@@ -1,0 +1,2189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Earth Information Jukebox — Simulation &amp; 16-Bit Eco RPG</title>
+<style>
+  :root {
+    --bg: #070b16;
+    --ink: #e8eef8;
+    --dim: #9fb0c9;
+    --line: #22304a;
+    --halo: #4aa3ff;
+    --gold: #d9a752;
+    --gold-bright: #ffe39f;
+    --gold-dark: #5e3b18;
+    --rpg-panel: rgba(18, 12, 26, 0.93);
+    --rpg-ink: #fff4dc;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(circle at 30% 20%, #101a33, var(--bg) 60%);
+    color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: calc(185px + env(safe-area-inset-bottom, 0px));
+  }
+  body.rpg-active { overflow: hidden; padding-bottom: 0; }
+
+  button:focus-visible, input:focus-visible, canvas:focus-visible {
+    outline: 3px solid #ffd166;
+    outline-offset: 3px;
+  }
+
+  /* =======================================================================
+     MODE SWITCHER & TOP BAR
+     ======================================================================= */
+  #mode-bar {
+    position: sticky; top: 0; z-index: 30;
+    background: rgba(7, 11, 22, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 8px 16px;
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  body.rpg-active #mode-bar {
+    position: fixed; left: 0; right: 0; top: 0;
+    background: rgba(18, 12, 26, 0.9);
+    border-bottom: 2px solid var(--gold);
+  }
+  .mode-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .mode-btn {
+    background: #14213d; color: var(--ink);
+    border: 1.5px solid #354e82; border-radius: 8px;
+    padding: 7px 12px; font: 600 13px system-ui, sans-serif;
+    cursor: pointer; min-height: 36px;
+    transition: transform 0.08s, background 0.15s;
+  }
+  .mode-btn:hover { background: #1e315c; }
+  .mode-btn.active-mode {
+    background: linear-gradient(135deg, #ff8a4c, #e05a2b);
+    color: #1a0b02; border-color: #ffd166; font-weight: 700;
+  }
+  .mode-btn.rpg-pill {
+    background: linear-gradient(180deg, #342318, #1f140e);
+    color: var(--gold-bright); border: 1.5px solid var(--gold);
+    font-family: "Courier New", monospace;
+  }
+  .mode-btn.rpg-pill:hover { filter: brightness(1.18); }
+
+  /* =======================================================================
+     1. EARTH ORBIT & LAB SIMULATION VIEW
+     ======================================================================= */
+  #sim-view {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: 26px;
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 20px 18px 40px;
+  }
+  #sim-view[hidden] { display: none; }
+  @media (max-width: 840px) { #sim-view { grid-template-columns: 1fr; } }
+
+  h1 { font: 600 2rem/1.15 Georgia, "Iowan Old Style", serif; margin: 0 0 6px; }
+  .sub { color: var(--dim); margin: 0 0 14px; max-width: 48ch; }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .wrap { position: relative; width: min(100%, 440px); }
+  #c {
+    width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: crosshair;
+    box-shadow: 0 0 calc(28px + var(--p, 0) * 0.45px) calc(6px + var(--p, 0) * 0.1px) var(--halo);
+    transition: transform 0.8s cubic-bezier(.6, 0, .3, 1), opacity 0.6s, box-shadow 0.4s;
+    touch-action: none; display: block;
+  }
+  .zoom #c { transform: scale(4.5); opacity: 0; pointer-events: none; }
+  #mv {
+    position: absolute; inset: 0; width: 100%; aspect-ratio: 1;
+    border-radius: 14px; opacity: 0; pointer-events: none;
+    transition: opacity 0.5s;
+  }
+  .zoom #mv { opacity: 1; pointer-events: auto; }
+  #back { position: absolute; right: 10px; top: 10px; z-index: 4; }
+  #toast {
+    position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 4;
+    background: #2a1408f0; border: 1px solid #ff8a4c; border-radius: 8px;
+    padding: 8px 12px; font-size: 0.85rem; opacity: 0;
+    transition: opacity 0.35s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; background: #0c1426;
+  }
+  .card h2 { font: 600 1.1rem Georgia, serif; margin: 0 0 8px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.92rem; }
+  input[type=range] { width: 100%; accent-color: #ff8a4c; height: 26px; cursor: pointer; }
+  .stats {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 10px 14px; margin: 10px 0 0;
+  }
+  @media (max-width: 500px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stats dt { color: var(--dim); font-size: 0.8rem; }
+  .stats dd { margin: 0; font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  button.sim-btn {
+    background: #14213d; color: var(--ink); border: 1px solid #2f4470;
+    border-radius: 8px; padding: 7px 12px; font: inherit; cursor: pointer; min-height: 38px;
+  }
+  button.sim-btn:hover { background: #1c2e55; }
+  button.sim-btn.on { background: #ff8a4c; color: #1a0d02; border-color: #ff8a4c; font-weight: 600; }
+  pre#tele {
+    font: 12px/1.45 ui-monospace, monospace; color: #bfe3ff;
+    white-space: pre-wrap; margin: 8px 0;
+  }
+  #spec {
+    width: 100%; height: 54px; background: #050810;
+    border-radius: 6px; display: block; margin-bottom: 8px;
+  }
+
+  /* Timeline Footer (Simulation Mode) */
+  #timeline-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 18;
+    background: #070b16f2; border-top: 1px solid var(--line);
+    padding: 8px 20px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  #timeline-bar[hidden] { display: none; }
+  #timeline-bar .row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .chk { font-weight: 400; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+  /* =======================================================================
+     2. 5-ROOM 16-BIT ECO-QUEST RPG WORLD VIEW
+     ======================================================================= */
+  #rpg-view {
+    position: fixed; inset: 0; z-index: 10;
+    background: #0c0914; display: flex; align-items: center; justify-content: center;
+  }
+  #rpg-view[hidden] { display: none; }
+  #game {
+    width: 100%; height: 100%; display: block;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    cursor: pointer;
+  }
+  #rpg-room-hud {
+    position: fixed; top: 56px; left: 12px; right: 12px; z-index: 16;
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+    gap: 8px; pointer-events: none;
+    font-family: "Courier New", monospace;
+  }
+  #rpg-room-hud[hidden] { display: none; }
+  .rpg-badge {
+    pointer-events: auto;
+    background: var(--rpg-panel);
+    border: 2px solid var(--gold);
+    box-shadow: 0 0 0 2px var(--gold-dark) inset, 0 4px 12px rgba(0,0,0,0.6);
+    border-radius: 8px; padding: 5px 10px;
+    font-size: 12px; color: var(--rpg-ink);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .meter-bar {
+    width: 74px; height: 10px; background: #1d1626;
+    border: 1px solid var(--gold); border-radius: 4px; overflow: hidden;
+  }
+  .meter-fill { height: 100%; width: 50%; background: #69d87c; transition: width 0.3s, background 0.3s; }
+
+  /* Mobile Touch D-Pad for RPG Mode */
+  #touch-pad {
+    position: fixed; left: 14px; bottom: 138px; z-index: 22;
+    display: none; grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 42px);
+    gap: 4px; opacity: 0.85;
+  }
+  body.rpg-active #touch-pad { display: grid; }
+  @media (pointer: fine) { body.rpg-active #touch-pad { display: none; } }
+  .pad-btn {
+    background: rgba(24, 16, 36, 0.88); border: 2px solid var(--gold);
+    border-radius: 8px; color: var(--gold-bright); font-weight: bold; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* =======================================================================
+     3. SHARED CLASSIC RPG DIALOGUE OVERLAY (BOTH MODES)
+     ======================================================================= */
+  #dialogue-wrap {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    width: min(840px, 95vw); z-index: 26;
+    font-family: "Courier New", Courier, monospace;
+    transition: transform 0.25s;
+  }
+  body.rpg-active #dialogue-wrap {
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  #dialogue-wrap.minimized {
+    transform: translate(-50%, calc(100% - 32px));
+  }
+  #dialogue-box {
+    position: relative;
+    background: var(--rpg-panel);
+    border: 3px solid var(--gold);
+    box-shadow: 0 0 0 3px var(--gold-dark) inset, 0 10px 28px rgba(0,0,0,0.78);
+    border-radius: 12px;
+    padding: 13px 14px 10px 136px;
+    min-height: 102px;
+  }
+  #portrait-frame {
+    position: absolute; left: 12px; bottom: 8px;
+    width: 110px; height: 124px;
+    background: radial-gradient(circle at 50% 45%, #372846, #191122);
+    border: 3px solid var(--gold);
+    box-shadow: 0 0 0 2px var(--gold-dark) inset, 0 4px 12px rgba(0,0,0,0.7);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 3;
+  }
+  #portrait-canvas { width: 98px; height: 110px; image-rendering: pixelated; }
+  #name-tab {
+    position: absolute; top: -18px; left: 132px;
+    background: linear-gradient(180deg, #3a2414, #22140b);
+    color: var(--gold-bright);
+    border: 3px solid var(--gold); border-bottom: 0;
+    border-radius: 9px 9px 0 0; padding: 2px 14px;
+    font-weight: bold; font-size: 14px;
+  }
+  #mood-badge {
+    position: absolute; top: -16px; right: 12px;
+    background: #23182e; border: 2px solid var(--gold);
+    border-radius: 999px; padding: 1px 10px;
+    font-size: 11px; color: var(--gold-bright);
+  }
+  #dialogue-text {
+    font-size: 13.5px; line-height: 1.42; color: var(--rpg-ink);
+    min-height: 46px; max-height: 82px; overflow-y: auto;
+  }
+  #dialogue-actions {
+    display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 5px;
+  }
+  .dlg-btn {
+    background: #2b1d14; color: var(--gold-bright);
+    border: 1.5px solid var(--gold); border-radius: 6px;
+    padding: 4px 10px; font: bold 11px "Courier New", monospace;
+    cursor: pointer; min-height: 28px;
+  }
+  .dlg-btn:hover { background: #462f20; }
+  .dlg-btn.primary { background: #3b692c; border-color: #9df589; color: #fff; }
+
+  /* =======================================================================
+     4. MODALS: MINI-GAMES, KHARITA SCROLL, QUEST SCROLL & ONBOARDING
+     ======================================================================= */
+  .modal-backdrop {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(6, 4, 12, 0.82);
+    display: flex; align-items: center; justify-content: center; padding: 14px;
+  }
+  .modal-backdrop[hidden] { display: none; }
+  .mg-card {
+    background: var(--rpg-panel); border: 3px solid var(--gold);
+    box-shadow: 0 0 0 3px var(--gold-dark) inset, 0 14px 40px rgba(0,0,0,0.85);
+    border-radius: 14px; width: min(640px, 96vw); max-height: 88vh;
+    overflow-y: auto; padding: 16px 18px; color: var(--rpg-ink);
+    font-family: "Courier New", monospace;
+  }
+  .mg-head {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 2px solid var(--gold-dark); padding-bottom: 8px; margin-bottom: 12px;
+  }
+  .mg-head h2 { margin: 0; font-size: 16px; color: var(--gold-bright); }
+  .mg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; margin: 12px 0; }
+  .mg-slot { background: #1d1528; border: 2px solid var(--gold); border-radius: 10px; padding: 10px; text-align: center; }
+  .mg-slot h3 { margin: 0 0 4px; font-size: 13px; color: var(--gold-bright); }
+  .mg-slot p { margin: 0 0 8px; font-size: 11px; color: #cbb894; }
+  .mg-choice {
+    width: 100%; margin-top: 4px; padding: 6px;
+    background: #2c2018; color: var(--rpg-ink); border: 1px solid var(--gold);
+    border-radius: 6px; font: bold 11px "Courier New", monospace; cursor: pointer;
+  }
+  .mg-choice:hover { background: #463224; }
+  .mg-choice.chosen { background: #2e6333; border-color: #9df589; }
+
+  #pipe-board { display: grid; grid-template-columns: repeat(4, 68px); gap: 6px; justify-content: center; margin: 12px auto; }
+  .pipe-cell {
+    width: 68px; height: 68px; background: #191326;
+    border: 2px solid #5c4978; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .pipe-cell.powered { border-color: #79f29a; background: #182b24; box-shadow: 0 0 10px #4ee68055; }
+  .pipe-cell canvas { width: 56px; height: 56px; image-rendering: pixelated; }
+
+  #bee-canvas {
+    width: 100%; max-width: 560px; height: 250px; display: block; margin: 8px auto;
+    border: 2px solid var(--gold); border-radius: 10px; background: #6ec265;
+    image-rendering: pixelated; touch-action: none;
+  }
+  .sort-bins { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .bin-btn {
+    padding: 14px 8px; border-radius: 10px; border: 2px solid var(--gold);
+    background: #231930; color: var(--rpg-ink); font: bold 13px "Courier New", monospace;
+    cursor: pointer; text-align: center;
+  }
+  .bin-btn:hover { background: #37274a; }
+
+  /* Parchment Scrolls */
+  .parchment {
+    background: linear-gradient(180deg, #f7e7c4, #ebd39f);
+    color: #362210; border: 6px double #7c4b1e;
+    box-shadow: 0 0 0 3px #c8964e inset, 0 18px 44px rgba(0,0,0,0.85);
+    border-radius: 14px; width: min(760px, 96vw); max-height: 90vh;
+    overflow-y: auto; padding: 18px 22px; font-family: Georgia, serif;
+  }
+  .parchment h1 { margin: 0 0 8px; font-size: 21px; color: #4a280a; border-bottom: 2px solid #b88446; padding-bottom: 6px; }
+  .parchment h2 { margin: 14px 0 6px; font-size: 16px; color: #6e370c; }
+  .parchment p, .parchment li { font-size: 14px; line-height: 1.5; }
+  .chem-box {
+    background: #fff9e8; border-left: 4px solid #c9562c;
+    padding: 6px 12px; margin: 6px 0;
+    font: bold 14px "Courier New", monospace; color: #2b1a0c;
+  }
+  .tab-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .tab-btn {
+    background: #dfc18a; color: #3a220e; border: 2px solid #8a5624;
+    border-radius: 8px; padding: 6px 12px; font: bold 12px "Courier New", monospace; cursor: pointer;
+  }
+  .tab-btn.active { background: #7c4b1e; color: #fff4dc; }
+  .quest-item {
+    background: #fff7e2; border: 2px solid #b58347; border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px;
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .quest-item.done { border-color: #3f8a48; background: #eefbe9; }
+
+  /* Onboarding Screen */
+  #onboarding {
+    position: fixed; inset: 0; z-index: 70;
+    background: radial-gradient(circle at 50% 25%, #3d2a4d, #1e162b 65%, #111a14);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 16px; text-align: center; overflow-y: auto; transition: opacity 0.6s;
+  }
+  #onboarding.fade-out { opacity: 0; pointer-events: none; }
+  #onboarding[hidden] { display: none; }
+  .ob-title { font-family: Georgia, serif; font-size: clamp(24px, 4vw, 36px); color: var(--gold-bright); text-shadow: 3px 3px 0 #3a2010; margin: 0 0 4px; }
+  #roster { display: grid; grid-template-columns: repeat(4, minmax(74px, 110px)); gap: 10px; margin: 12px 0; }
+  .char-card {
+    background: #f6e6c2; border: 3px solid #633d1e; border-radius: 8px;
+    padding: 8px 4px; color: #362110; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    font: bold 13px "Courier New", monospace; box-shadow: 0 4px 0 #3a2210;
+  }
+  .char-card[aria-pressed="true"] { background: #ffd77d; border-color: #d45224; transform: translateY(-2px); }
+  .char-card canvas { width: 64px; height: 72px; image-rendering: pixelated; }
+  #name-input {
+    font: bold 14px "Courier New", monospace; padding: 8px 12px;
+    border: 3px solid #633d1e; background: #fff9ea; color: #2b1a0c;
+    border-radius: 8px; text-align: center; width: 220px; margin-bottom: 10px;
+  }
+  #big-preview { width: 140px; height: 158px; image-rendering: pixelated; margin-bottom: 8px; }
+  .ob-speech {
+    background: #fdf3dc; color: #362110; border: 4px solid #633d1e;
+    box-shadow: 0 0 0 3px #fdf3dc inset, 6px 6px 0 rgba(0,0,0,0.45);
+    border-radius: 10px; padding: 14px 16px; max-width: 520px;
+    font: 14px/1.5 "Courier New", monospace; text-align: left; margin-bottom: 12px;
+  }
+  .sr-only { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  @media (max-width: 680px) {
+    #dialogue-box { padding: 12px 10px 9px 98px; min-height: 94px; }
+    #portrait-frame { width: 80px; height: 92px; left: 8px; }
+    #portrait-canvas { width: 72px; height: 82px; }
+    #name-tab { left: 96px; font-size: 12px; }
+    #dialogue-text { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="sr-live" class="sr-only" aria-live="polite"></div>
+
+<!-- Top Navigation & Mode Switcher -->
+<header id="mode-bar">
+  <div class="mode-group" role="tablist" aria-label="Experience Mode">
+    <button id="tab-sim" class="mode-btn active-mode" role="tab" aria-selected="true">🌍 Earth Orbit &amp; Lab</button>
+    <button id="tab-rpg" class="mode-btn" role="tab" aria-selected="false">🌱 16-Bit Eco-Quest RPG</button>
+  </div>
+  <div class="mode-group">
+    <button id="btn-sound" class="mode-btn" aria-pressed="false">🔇 Sound: Off</button>
+    <button id="btn-voice" class="mode-btn" aria-pressed="false">🗣️ Narrator: Off</button>
+    <button id="btn-kharita" class="mode-btn rpg-pill">🗺️ Kharita (K)</button>
+    <button id="btn-quests" class="mode-btn rpg-pill">📜 Quests (<span id="quest-count">0/5</span>)</button>
+  </div>
+</header>
+
+<!-- =========================================================================
+     VIEW 1: INTERACTIVE EARTH SCIENCE SIMULATION & JUKEBOX
+     ========================================================================= -->
+<main id="sim-view">
+  <section class="stage" aria-label="Interactive Earth Globe and Biome Scanner">
+    <div class="wrap">
+      <canvas id="c" width="230" height="230" tabindex="0" role="img"
+        aria-label="Rotating Earth. Click or tap a spot to zoom into a biome and hear it. Arrow keys rotate the globe."></canvas>
+      <canvas id="mv" width="460" height="460" tabindex="0" role="img"
+        aria-label="Close-up of selected biome. Pointer or Shift+Arrow keys scan pixels into pitch and stereo sound."></canvas>
+      <button id="back" class="sim-btn" hidden>← Back to Orbit</button>
+      <div id="toast" role="status"></div>
+    </div>
+
+    <div class="btns" role="group" aria-label="Zoom into Biome">
+      <button class="sim-btn" data-k="ocean">🌊 Ocean</button>
+      <button class="sim-btn" data-k="forest">🌲 Forest</button>
+      <button class="sim-btn" data-k="soil">🪱 Soil</button>
+      <button class="sim-btn" data-k="ice">🧊 Polar Ice</button>
+      <button class="sim-btn" data-k="city">🏙️ Megacity</button>
+    </div>
+
+    <div class="card" style="width:100%">
+      <h2 id="it">Explore Earth from Orbit</h2>
+      <p id="ib" style="margin:0;color:var(--dim)">Click anywhere on the spinning globe—or choose a biome button above—to inspect living ecosystems and hear their real-time data sonification.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="card">
+      <h2>Climate &amp; Atmospheric Controls</h2>
+      <div style="margin-bottom:6px">
+        <label for="co2">Atmospheric CO₂: <span id="vc">427</span> ppm</label>
+        <input id="co2" type="range" min="250" max="1000" step="1" value="427">
+      </div>
+      <div style="margin-bottom:6px">
+        <label for="ch4">Methane (CH₄): <span id="vm">1.93</span> ppm</label>
+        <input id="ch4" type="range" min="0.5" max="5" step="0.01" value="1.93">
+      </div>
+      <div style="margin-bottom:6px">
+        <label for="o2">Oxygen (O₂): <span id="vo">20.95</span>%</label>
+        <input id="o2" type="range" min="19" max="21.5" step="0.01" value="20.95">
+      </div>
+
+      <dl class="stats">
+        <div><dt>Global Temp</dt><dd id="s1">+1.3 °C</dd></div>
+        <div><dt>Sea Level</dt><dd id="s2">+38 cm</dd></div>
+        <div><dt>Polar Ice Left</dt><dd id="s3">74%</dd></div>
+        <div><dt>Forest Health</dt><dd id="s4">88%</dd></div>
+        <div><dt>Biodiversity</dt><dd id="s5">82</dd></div>
+        <div><dt>Atmosphere</dt><dd id="s6">427 ppm</dd></div>
+      </dl>
+
+      <div id="locw" hidden style="margin-top:10px">
+        <label for="loc" id="locl">Local Biome Stress</label>
+        <input id="loc" type="range" min="0" max="100" value="0">
+      </div>
+      <div id="grid" class="btns" hidden role="group" aria-label="City Energy Grid" style="margin-top:10px">
+        <button class="sim-btn on" data-g="fossil">🏭 Fossil</button>
+        <button class="sim-btn" data-g="solar">☀️ Solar</button>
+        <button class="sim-btn" data-g="wind">🌬️ Wind</button>
+        <button class="sim-btn" data-g="nuclear">⚛️ Nuclear</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>NASA EIC Sonification Jukebox</h2>
+      <div class="btns" role="group" aria-label="NASA Sonification Presets">
+        <button class="sim-btn" data-t="1">1 Ocean Health</button>
+        <button class="sim-btn" data-t="2">2 GEDI Forest</button>
+        <button class="sim-btn" data-t="3">3 Soil Microbiome</button>
+        <button class="sim-btn" data-t="4">4 1750–2100 Replay</button>
+      </div>
+      <pre id="tele" aria-live="off">Turn sound on to hear live Earth data sonification.</pre>
+      <canvas id="spec" width="320" height="54" aria-hidden="true"></canvas>
+      <div class="btns">
+        <button id="mt" class="sim-btn" aria-pressed="false">🔇 Mute Audio</button>
+        <button id="launch-rpg-inline" class="sim-btn" style="border-color:#ffd166;color:#ffe39f">🌱 Enter 16-Bit Eco-Quest World →</button>
+      </div>
+      <small style="display:block;margin-top:6px;color:var(--dim)">Shortcuts: Space play/pause sound · 1–4 tracks · , / . scrub years · K Kharita Map · Q Quests</small>
+    </div>
+  </section>
+</main>
+
+<!-- Timeline Footer (Simulation Mode) -->
+<footer id="timeline-bar">
+  <div class="row">
+    <label for="yr">Historical &amp; Projected Year: <b id="yl">2026</b> — <span id="era" style="color:var(--dim);font-weight:400">Observed trend</span></label>
+    <label class="chk"><input type="checkbox" id="iv"> Intervention Mode (post-2026 clean transition)</label>
+  </div>
+  <input id="yr" type="range" min="1750" max="2100" value="2026">
+</footer>
+
+<!-- =========================================================================
+     VIEW 2: 5-ROOM 16-BIT INDIE RPG ECO-QUEST WORLD
+     ========================================================================= -->
+<section id="rpg-view" hidden>
+  <div id="rpg-room-hud">
+    <div class="rpg-badge">
+      <strong id="room-title" style="color:var(--gold-bright)">I. Industrial Outskirts</strong>
+      <span>Pollution: <b id="pol-pct">85%</b></span>
+      <div class="meter-bar" aria-hidden="true"><div id="pol-bar" class="meter-fill"></div></div>
+    </div>
+    <div class="rpg-badge" style="color:#bfe8ff;font-size:11px">
+      <span id="rpg-tele">Hue 35° → Ddim7 · 82 BPM</span>
+    </div>
+  </div>
+  <canvas id="game" width="480" height="270" tabindex="0" role="application"
+    aria-label="16-bit Eco-Quest world. Walk with WASD, Arrow keys, or click. Press E or Space to interact with spirits and eco-quests."></canvas>
+</section>
+
+<!-- Mobile Touch D-Pad (RPG Mode) -->
+<div id="touch-pad" aria-label="Directional movement controls">
+  <div></div><button class="pad-btn" data-dir="up" aria-label="Move Up">▲</button><div></div>
+  <button class="pad-btn" data-dir="left" aria-label="Move Left">◀</button>
+  <button class="pad-btn" id="pad-act" aria-label="Interact">E</button>
+  <button class="pad-btn" data-dir="right" aria-label="Move Right">▶</button>
+  <div></div><button class="pad-btn" data-dir="down" aria-label="Move Down">▼</button><div></div>
+</div>
+
+<!-- =========================================================================
+     SHARED RETRO RPG DIALOGUE BOX & PORTRAIT (BOTH MODES)
+     ========================================================================= -->
+<aside id="dialogue-wrap" aria-label="Companion Dialogue">
+  <div id="dialogue-box">
+    <div id="portrait-frame">
+      <canvas id="portrait-canvas" width="32" height="36" aria-hidden="true"></canvas>
+    </div>
+    <div id="name-tab">Companion</div>
+    <div id="mood-badge">✨ Healthy Air</div>
+    <div id="dialogue-text">Welcome to the Earth Information Jukebox!</div>
+    <div id="dialogue-actions">
+      <button id="btn-interact" class="dlg-btn primary" hidden>✨ Interact (E)</button>
+      <button id="btn-tip" class="dlg-btn">💡 NASA Fact</button>
+      <button id="btn-min-dlg" class="dlg-btn" title="Minimize or expand dialogue">▼</button>
+    </div>
+  </div>
+</aside>
+
+<!-- =========================================================================
+     ECO-QUEST MINI-GAME OVERLAY
+     ========================================================================= -->
+<div id="minigame-overlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="mg-title" hidden>
+  <div class="mg-card">
+    <div class="mg-head">
+      <h2 id="mg-title">Eco-Quest</h2>
+      <button id="mg-close" class="dlg-btn">✕ Close (Esc)</button>
+    </div>
+    <div id="mg-body"></div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     KHARITA (SCIENCE & CHEMISTRY SCROLL)
+     ========================================================================= -->
+<div id="modal-kharita" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Kharita Science Map" hidden>
+  <div class="parchment">
+    <button id="close-kharita" class="mode-btn rpg-pill" style="float:right">✕ Close</button>
+    <h1>🗺️ Kharita: NASA Earth Science &amp; Field Guide</h1>
+    <div class="tab-row" role="tablist">
+      <button class="tab-btn active" data-ktab="nasa">🛰️ NASA Satellites</button>
+      <button class="tab-btn" data-ktab="chem">⚗️ Earth Chemistry</button>
+      <button class="tab-btn" data-ktab="history">⏳ Climate Milestones</button>
+    </div>
+    <div id="ktab-nasa">
+      <p>Both the global Earth simulation and the 5-room RPG reflect real orbital instruments from NASA's <strong>Earth Information Center (EIC)</strong>:</p>
+      <ul>
+        <li><strong>OCO-2 &amp; OCO-3 (Orbiting Carbon Observatory):</strong> Measures atmospheric CO₂ from space to map emissions and forest carbon sinks.</li>
+        <li><strong>GEDI (Global Ecosystem Dynamics Investigation):</strong> Space Station LiDAR laser mapping 3D forest canopy height and stored biomass.</li>
+        <li><strong>SMAP (Soil Moisture Active Passive):</strong> Tracks soil water worldwide to monitor droughts, floods, and soil microbiomes.</li>
+        <li><strong>PACE (Plankton, Aerosol, Cloud, ocean Ecosystem):</strong> Watches ocean color to track phytoplankton that generate ~50% of Earth's oxygen.</li>
+        <li><strong>SWOT (Surface Water and Ocean Topography):</strong> Surveys Earth's rivers, lakes, and coastal sea-surface heights.</li>
+      </ul>
+    </div>
+    <div id="ktab-chem" hidden>
+      <h2>Ocean Acidification &amp; Reef Chemistry</h2>
+      <div class="chem-box">CO₂ + H₂O ⇌ H₂CO₃ ⇌ H⁺ + HCO₃⁻</div>
+      <p>Excess atmospheric CO₂ dissolves into seawater to form <strong>carbonic acid (H₂CO₃)</strong>, releasing H⁺ ions that lower ocean pH from its healthy ~8.1–8.2 baseline.</p>
+      <div class="chem-box">CaCO₃ (Coral Skeleton) + H⁺ → Ca²⁺ + HCO₃⁻</div>
+      <p>Higher acidity makes it harder for corals and shellfish to build calcium carbonate skeletons.</p>
+      <h2>Photosynthesis &amp; Carbon Sinks</h2>
+      <div class="chem-box">6CO₂ + 6H₂O + Sunlight → C₆H₁₂O₆ + 6O₂</div>
+      <p>Forests, meadows, and phytoplankton convert CO₂ into oxygen and organic carbon locked in roots and deep soil mycelium.</p>
+      <h2>Radiative Forcing</h2>
+      <div class="chem-box">ΔF ≈ 5.35 × ln(C / C₀) W/m²</div>
+      <p>Each doubling of CO₂ above pre-industrial levels (C₀ = 280 ppm) traps roughly 3.7 W/m² of extra infrared heat.</p>
+    </div>
+    <div id="ktab-history" hidden>
+      <h2>Key Earth &amp; Climate Milestones</h2>
+      <ul>
+        <li><strong>1760 — Industrial Revolution:</strong> Coal-powered industry begins raising atmospheric CO₂ from ~280 ppm.</li>
+        <li><strong>1958 — The Keeling Curve:</strong> Charles David Keeling begins precision CO₂ measurements at Mauna Loa (315 ppm).</li>
+        <li><strong>1970 — Clean Air Act:</strong> Landmark policy cuts sulfur dioxide and soot, proving clean air regulations work.</li>
+        <li><strong>1987 — Montreal Protocol:</strong> Global treaty phases out ozone-depleting CFCs so the ozone layer can heal.</li>
+        <li><strong>2015 — Paris Agreement:</strong> Nations unite to pursue limiting global warming to 1.5 °C above pre-industrial levels.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     QUEST SCROLL & FAST-TRAVEL WAYPOINTS
+     ========================================================================= -->
+<div id="modal-quests" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quest Scroll and Fast Travel" hidden>
+  <div class="parchment">
+    <button id="close-quests" class="mode-btn rpg-pill" style="float:right">✕ Close</button>
+    <h1>📜 Eco-Quest Scroll &amp; World Waypoints</h1>
+    <p>Restore all <strong>5 Biomes</strong> in the 16-Bit RPG to heal the global Earth simulation and unlock every harmonic layer in the Jukebox! Click <em>Travel</em> to warp directly to any room.</p>
+    <div id="quest-list"></div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     CHARACTER SELECTION ONBOARDING
+     ========================================================================= -->
+<section id="onboarding" role="dialog" aria-modal="true" aria-label="Choose Your Pixel Companion">
+  <h1 class="ob-title">Earth Information Jukebox</h1>
+  <p style="color:#e6d4b3;font-size:13px;margin:0 0 10px;max-width:540px">Explore NASA's interactive Earth climate simulation AND adventure through 5 interconnected 16-bit biomes with your chosen companion!</p>
+  <div id="ob-step1">
+    <p style="color:var(--gold-bright);font-weight:bold;margin:0 0 6px">Choose Your Guide Companion</p>
+    <div id="roster"></div>
+    <div>
+      <label for="name-input" class="sr-only">Companion Name</label>
+      <input id="name-input" maxlength="14" placeholder="Custom Name (optional)">
+    </div>
+    <button id="btn-select-char" class="mode-btn rpg-pill" disabled style="font-size:14px;padding:10px 20px">✨ Confirm Companion</button>
+  </div>
+  <div id="ob-step2" hidden>
+    <canvas id="big-preview" width="32" height="36" aria-hidden="true"></canvas>
+    <div class="ob-speech" id="ob-intro-text" aria-live="polite"></div>
+    <div class="btns" style="justify-content:center">
+      <button id="btn-start-sim" class="mode-btn active-mode" style="font-size:14px;padding:10px 18px">🌍 Start in Earth Orbit &amp; Lab</button>
+      <button id="btn-start-rpg" class="mode-btn rpg-pill" style="font-size:14px;padding:10px 18px">🌱 Start in 16-Bit Eco-Quest</button>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let activeMode = 'sim'; // 'sim' | 'rpg'
+
+  // =========================================================================
+  // 1. SHARED CLIMATE SIMULATION STATE & BI-DIRECTIONAL RPG SYNC
+  // =========================================================================
+  const cv = $('c'), ctx = cv.getContext('2d'), N = 230;
+  const mv = $('mv'), mctx = mv.getContext('2d'), S = 460;
+  let rot = 0, drag = null, auto = true, lastRot = 0, view = 'orbit';
+  let year = 2026, interv = false, co2 = 427, ch4 = 1.93, o2 = 20.95, gr = 'fossil';
+  let T = 1.3, pol = 32, iceF = 0.74, acid = 0.3, reef = 0.78, fish = 0.85, trees = 0.88, soil = 0.86, slr = 0.38, bio = 82;
+  const L = { wp: 15, df: 12, pest: 14 };
+  const tipped = {};
+  const GR_FACTOR = { fossil: 0, solar: 0.7, wind: 0.75, nuclear: 0.8 };
+  const V2L = { ocean: 'wp', forest: 'df', soil: 'pest' };
+  const LBL = { ocean: 'Water pollution', forest: 'Human encroachment (deforestation)', soil: 'Pesticide toxicity' };
+
+  // Procedural 3D-projected equirectangular Earth map
+  const W_MAP = 256, H_MAP = 128;
+  function h3(x, y, z) { const n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453; return n - Math.floor(n); }
+  function vn(x, y, z) {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+    const xf = x - xi, yf = y - yi, zf = z - zi, s = t => t * t * (3 - 2 * t);
+    const l = (a, b, t) => a + (b - a) * t;
+    const r = [];
+    for (let k = 0; k < 2; k++) {
+      const a = l(h3(xi, yi, zi + k), h3(xi + 1, yi, zi + k), s(xf));
+      const b = l(h3(xi, yi + 1, zi + k), h3(xi + 1, yi + 1, zi + k), s(xf));
+      r.push(l(a, b, s(yf)));
+    }
+    return l(r[0], r[1], s(zf));
+  }
+  const fbm = (x, y, z) => vn(x * 1.6, y * 1.6, z * 1.6) * 0.55 + vn(x * 3.2, y * 3.2, z * 3.2) * 0.3 + vn(x * 6.4, y * 6.4, z * 6.4) * 0.15;
+  const land = new Float32Array(W_MAP * H_MAP), wet = new Float32Array(W_MAP * H_MAP);
+  for (let j = 0; j < H_MAP; j++) {
+    for (let i = 0; i < W_MAP; i++) {
+      const lo = i / W_MAP * 6.2832, la = (j / H_MAP - 0.5) * 3.1416;
+      const x = Math.cos(la) * Math.cos(lo), y = Math.sin(la), z = Math.cos(la) * Math.sin(lo);
+      land[j * W_MAP + i] = fbm(x + 5, y + 5, z + 5);
+      wet[j * W_MAP + i] = fbm(x * 2 + 20, y * 2 + 20, z * 2 + 20);
+    }
+  }
+  const mixCol = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const rgb = c => `rgb(${c.map(Math.round)})`;
+  const R = n => { const x = Math.sin(n * 9.13) * 1e4; return x - Math.floor(x); };
+  const pc = v => Math.round(v * 100) + '%';
+
+  const globeImg = ctx.createImageData(N, N);
+  function sampleGlobe(x, y) {
+    const r2 = x * x + y * y;
+    if (r2 > 1) return null;
+    const z = Math.sqrt(1 - r2), la = Math.asin(y), a = Math.atan2(x, z) + rot;
+    const lo = ((a % 6.2832) + 6.2832) % 6.2832;
+    const i = Math.min(W_MAP - 1, (lo / 6.2832 * W_MAP) | 0);
+    const j = Math.min(H_MAP - 1, ((la / 3.1416 + 0.5) * H_MAP) | 0);
+    const p = pol / 100, sea = 0.5 + p * 0.05, ice = 1.3 - p * 0.55;
+    const hgt = land[j * W_MAP + i], m = wet[j * W_MAP + i];
+    let k;
+    if (Math.abs(la) > ice) k = 'ice';
+    else if (hgt > sea) k = (m < 0.45 + p * 0.12 && Math.abs(la) < 0.7 + p * 0.3) ? 'desert' : 'forest';
+    else k = 'ocean';
+    return { k, la, lo, z, x, y, hgt, m, sea };
+  }
+
+  function drawGlobe() {
+    const d = globeImg.data, p = pol / 100, smog = [150, 110, 70];
+    for (let py = 0; py < N; py++) {
+      for (let px = 0; px < N; px++) {
+        const s = sampleGlobe((px / N - 0.5) * 2, -(py / N - 0.5) * 2);
+        const o = (py * N + px) * 4;
+        if (!s) { d[o + 3] = 0; continue; }
+        let c;
+        if (s.k === 'ice') c = mixCol([235, 244, 252], [170, 160, 150], p * 0.7);
+        else if (s.k === 'desert') c = mixCol([214, 180, 110], [170, 120, 70], p * 0.5);
+        else if (s.k === 'forest') c = mixCol([46, 130, 68], [120, 100, 50], p);
+        else {
+          c = mixCol([18, 70, 150], [40, 95, 105], p * 0.8);
+          c = mixCol(c, [10, 40, 100], Math.min(0.6, Math.max(0, s.sea - s.hgt) * 3));
+        }
+        c = mixCol(c, smog, p * 0.3 * (1 - s.z * 0.5));
+        const lit = 0.35 + 0.75 * Math.max(0, s.z * 0.7 - s.x * 0.35);
+        d[o] = Math.min(255, c[0] * lit);
+        d[o + 1] = Math.min(255, c[1] * lit);
+        d[o + 2] = Math.min(255, c[2] * lit);
+        d[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(globeImg, 0, 0);
+    // City lights overlay
+    const CT = [[0.7, 0.3], [0.6, 2.2], [0.5, -1.4], [-0.3, -0.7], [0.1, 1.2], [-0.6, 2.6]];
+    const sp = year <= 2026 ? Math.max(0, (year - 1800) / 226) : 1 + 0.4 * (year - 2026) / 74 * (interv ? 0.3 : 1);
+    CT.forEach(c => {
+      const a = c[1] - rot, x = Math.cos(c[0]) * Math.sin(a), z = Math.cos(c[0]) * Math.cos(a);
+      if (z < 0.15 || sp <= 0) return;
+      ctx.fillStyle = 'rgba(255, 215, 110, 0.9)';
+      ctx.beginPath();
+      ctx.arc((x / 2 + 0.5) * N, (0.5 - Math.sin(c[0]) / 2) * N, 1 + sp * 2.2, 0, 7);
+      ctx.fill();
+    });
+  }
+
+  // Biome close-up canvas (#mv) renderers
+  const FS = [...Array(36)].map((_, i) => ({ x: R(i) * S, y: 90 + R(i + 50) * 250, s: 0.5 + R(i + 9), c: R(i + 3) }));
+  const PL = [...Array(70)].map((_, i) => ({ x: R(i + 7) * S, y: R(i + 8) * S }));
+  const SG = [...Array(150)].map((_, i) => {
+    const x = R(i) * S, y = S * 0.45 + R(i + 1) * S * 0.5;
+    return [x, y, x + (R(i + 2) - 0.5) * 80, y + (R(i + 3) - 0.3) * 60, R(i + 4)];
+  });
+  let iceChunks = [], lastChunk = 0;
+
+  function drawCloseUp(t) {
+    mctx.clearRect(0, 0, S, S);
+    const labelBar = txt => {
+      mctx.save(); mctx.shadowColor = '#000'; mctx.shadowBlur = 5;
+      mctx.fillStyle = '#fff'; mctx.font = '13px system-ui';
+      mctx.fillText(txt, 12, S - 12); mctx.restore();
+    };
+
+    if (view === 'ocean') {
+      const w = L.wp / 100, g = mctx.createLinearGradient(0, 0, 0, S);
+      g.addColorStop(0, rgb(mixCol([50, 160, 205], [95, 105, 70], w)));
+      g.addColorStop(1, rgb(mixCol([6, 32, 85], [22, 26, 20], w * 0.9)));
+      mctx.fillStyle = g; mctx.fillRect(0, 0, S, S);
+      mctx.fillStyle = 'rgba(255,255,255,0.35)';
+      PL.forEach(p => mctx.fillRect(p.x + Math.sin(t / 900 + p.y) * 8, (p.y - t * 0.01 * (1 + p.x % 3) + S * 9) % S, 2, 2));
+      mctx.fillStyle = rgb(mixCol([194, 170, 110], [80, 70, 50], w * 0.7));
+      mctx.beginPath(); mctx.moveTo(0, S);
+      for (let x = 0; x <= S; x += 20) mctx.lineTo(x, S - 40 + Math.sin(x * 0.03) * 10);
+      mctx.lineTo(S, S); mctx.fill();
+      for (let i = 0; i < 14; i++) {
+        const x = i * 33 + 16, h = 34 + (i % 4) * 14, sw = Math.sin(t / 700 + i) * 4;
+        mctx.strokeStyle = mctx.fillStyle = rgb(mixCol([240, 90, 130], [232, 232, 222], 1 - reef));
+        mctx.lineWidth = 5;
+        for (let b = -1; b < 2; b++) {
+          mctx.beginPath(); mctx.moveTo(x, S - 38); mctx.lineTo(x + b * 12 + sw, S - 38 - h); mctx.stroke();
+          mctx.beginPath(); mctx.arc(x + b * 12 + sw, S - 38 - h, 5, 0, 7); mctx.fill();
+        }
+      }
+      const n = Math.round(fish * FS.length);
+      FS.forEach((f, i) => {
+        const dead = i >= n; if (dead && i >= n + 8) return;
+        let x = (f.x + t * 0.05 * f.s) % S, y = f.y + Math.sin(t / 500 + i) * 10;
+        if (dead) { y = 22 + (i % 5) * 6; x = (f.x + t * 0.01) % S; }
+        mctx.save(); mctx.translate(x, y); if (dead) mctx.scale(1, -1);
+        mctx.fillStyle = dead ? '#8a8f86' : `hsl(${15 + f.c * 30}, 90%, 58%)`;
+        mctx.beginPath(); mctx.ellipse(0, 0, 11, 5, 0, 0, 7); mctx.fill();
+        mctx.beginPath(); mctx.moveTo(-9, 0); mctx.lineTo(-17, -5); mctx.lineTo(-17, 5); mctx.fill();
+        mctx.restore();
+      });
+      labelBar(`Ocean: reef ${pc(reef)}, fish ${pc(fish)}, acidity ${pc(acid)}`);
+    } else if (view === 'forest') {
+      const d = trees, hz = pol / 100, g = mctx.createLinearGradient(0, 0, 0, S);
+      g.addColorStop(0, rgb(mixCol([120, 185, 235], [190, 150, 100], hz)));
+      g.addColorStop(1, rgb(mixCol([210, 235, 230], [220, 190, 150], hz)));
+      mctx.fillStyle = g; mctx.fillRect(0, 0, S, S);
+      const lf = rgb(mixCol([34, 125, 58], [125, 100, 45], Math.min(1, (1 - d) * 0.9)));
+      mctx.fillStyle = rgb(mixCol([58, 95, 45], [110, 85, 50], 1 - d));
+      mctx.fillRect(0, S * 0.75, S, S * 0.25);
+      for (let i = 0; i < 16; i++) {
+        if ((i * 7 % 16) / 16 >= d) continue;
+        const x = i * 29 + 10, y = S * (0.76 + (i % 3) * 0.05), h = 70 + (i % 4) * 18, sw = Math.sin(t / 900 + i) * 2;
+        mctx.fillStyle = '#4b3524'; mctx.fillRect(x - 4, y - h * 0.5, 8, h * 0.5);
+        mctx.fillStyle = lf;
+        for (let k = 0; k < 3; k++) {
+          mctx.beginPath();
+          mctx.moveTo(x - 26 + k * 4 + sw, y - h * 0.3 - k * h * 0.22);
+          mctx.lineTo(x + 26 - k * 4 + sw, y - h * 0.3 - k * h * 0.22);
+          mctx.lineTo(x + sw, y - h * 0.7 - k * h * 0.22);
+          mctx.fill();
+        }
+      }
+      labelBar(`Forest: tree cover ${pc(d)} · GEDI LiDAR canopy density`);
+    } else if (view === 'soil') {
+      const p = L.pest / 100, g = mctx.createLinearGradient(0, 0, 0, S);
+      g.addColorStop(0, rgb(mixCol([96, 64, 40], [90, 90, 40], p)));
+      g.addColorStop(1, rgb(mixCol([40, 26, 16], [40, 50, 20], p)));
+      mctx.fillStyle = g; mctx.fillRect(0, 0, S, S);
+      SG.forEach((s, i) => {
+        if (s[4] > soil) return;
+        mctx.strokeStyle = `rgba(240,230,200,${0.35 + 0.25 * Math.sin(t / 500 + i)})`;
+        mctx.lineWidth = 1.4; mctx.beginPath(); mctx.moveTo(s[0], s[1]); mctx.lineTo(s[2], s[3]); mctx.stroke();
+      });
+      mctx.fillStyle = '#9be07a';
+      for (let i = 0; i < Math.round(50 * soil); i++) {
+        mctx.beginPath();
+        mctx.ellipse(R(i + 20) * S + Math.sin(t / 400 + i) * 6, S * 0.3 + R(i + 21) * S * 0.65, 4, 2, i, 0, 7);
+        mctx.fill();
+      }
+      labelBar(`Soil: microbe diversity ${pc(soil)}, mycelium network ${pc(soil)}`);
+    } else if (view === 'ice') {
+      const hz = pol / 100, g = mctx.createLinearGradient(0, 0, 0, S * 0.6);
+      g.addColorStop(0, rgb(mixCol([110, 170, 230], [190, 150, 110], hz * 0.6)));
+      g.addColorStop(1, '#dfeaf5');
+      mctx.fillStyle = g; mctx.fillRect(0, 0, S, S);
+      const sl = S * 0.62 - slr * 30, e = S * (0.15 + 0.65 * iceF);
+      mctx.fillStyle = '#fff'; mctx.beginPath();
+      mctx.moveTo(0, S * 0.3); mctx.lineTo(e * 0.7, S * 0.25); mctx.lineTo(e, sl); mctx.lineTo(0, sl); mctx.fill();
+      mctx.fillStyle = '#1d5f9e'; mctx.fillRect(0, sl, S, S - sl);
+      if (T > 0.6 && t - lastChunk > 2200 / T) { lastChunk = t; iceChunks.push({ x: e, t0: t }); }
+      iceChunks = iceChunks.filter(c => t - c.t0 < 9000);
+      iceChunks.forEach(c => {
+        const a = t - c.t0, y = Math.min(sl - 6, sl - 60 + a * 0.08), x = c.x + a * 0.012;
+        mctx.fillStyle = '#f4fbff'; mctx.fillRect(x - 10, y - 6, 20, 12);
+      });
+      labelBar(`Ice sheet ${pc(iceF)} · albedo ${pc(0.1 + 0.45 * iceF)}`);
+    } else if (view === 'city') {
+      const sm = pol / 100 * (1 - GR_FACTOR[gr]), g = mctx.createLinearGradient(0, 0, 0, S);
+      g.addColorStop(0, rgb(mixCol([90, 150, 215], [165, 125, 85], sm)));
+      g.addColorStop(1, rgb(mixCol([200, 225, 240], [190, 160, 120], sm)));
+      mctx.fillStyle = g; mctx.fillRect(0, 0, S, S);
+      for (let i = 0; i < 14; i++) {
+        const h = 60 + R(i) * 170, x = i * 33;
+        mctx.fillStyle = '#2b3550'; mctx.fillRect(x, S * 0.8 - h, 28, h + S * 0.2);
+        mctx.fillStyle = '#ffe08a';
+        for (let k = 0; k < h; k += 14) mctx.fillRect(x + 5, S * 0.8 - h + k + 4, 4, 5);
+      }
+      mctx.fillStyle = '#28412e'; mctx.fillRect(0, S * 0.8, S, S * 0.2);
+      labelBar(`Megacity on ${gr} power · smog ${pc(sm)}`);
+    }
+
+    if (scan.on) {
+      mctx.strokeStyle = '#fff'; mctx.lineWidth = 2;
+      mctx.beginPath(); mctx.arc(scan.x, scan.y, 12, 0, 7); mctx.stroke();
+    }
+  }
+
+  // Timeline & Physics Model
+  const lerpT = (tbl, y) => {
+    for (let i = 1; i < tbl.length; i++) {
+      if (y <= tbl[i][0]) {
+        const a = tbl[i - 1], b = tbl[i];
+        return a[1] + (b[1] - a[1]) * (y - a[0]) / (b[0] - a[0]);
+      }
+    }
+    return tbl[tbl.length - 1][1];
+  };
+  const C_HIST = [[1750, 280], [1900, 296], [1950, 311], [2000, 370], [2026, 427]];
+  const C_BAU  = [[2026, 427], [2100, 700]];
+  const C_INT  = [[2026, 427], [2050, 430], [2100, 360]];
+  const M_HIST = [[1750, 0.72], [1900, 0.9], [1950, 1.1], [2000, 1.77], [2026, 1.93]];
+  const M_BAU  = [[2026, 1.93], [2100, 3.0]];
+  const M_INT  = [[2026, 1.93], [2100, 1.5]];
+
+  function setYear(y) {
+    year = y;
+    const f = y <= 2026 ? [C_HIST, M_HIST] : interv ? [C_INT, M_INT] : [C_BAU, M_BAU];
+    co2 = lerpT(f[0], y);
+    ch4 = lerpT(f[1], y);
+    o2 = 20.95 - (co2 - 280) * 0.0008;
+    $('yl').textContent = y;
+    $('yr').value = y;
+    $('era').textContent = y < 1850 ? 'Pre-industrial' : y <= 2026 ? 'Observed trend' : interv ? 'Projection with intervention' : 'Business as usual';
+    syncControls();
+  }
+
+  function syncControls() {
+    $('co2').value = co2;
+    $('ch4').value = ch4;
+    $('o2').value = o2;
+    $('vc').textContent = Math.round(co2);
+    $('vm').textContent = ch4.toFixed(2);
+    $('vo').textContent = o2.toFixed(2);
+    runPhysics();
+  }
+
+  const TP = [
+    ['t15', () => T >= 1.5, '+1.5 °C crossed', 'Beyond 1.5 °C, ice sheets and reefs begin passing long-term tipping thresholds.'],
+    ['ice', () => iceF < 0.5, 'Ice-albedo feedback', 'Less white ice reflects less sunlight, accelerating ocean warming.'],
+    ['reef', () => reef < 0.25, 'Coral reef bleaching', 'Warm, acidic water (H₂CO₃) stresses coral skeletons.']
+  ];
+  function toast(a, b) {
+    const e = $('toast');
+    e.innerHTML = `<b>${a}</b><br>${b}`;
+    e.classList.add('show');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => e.classList.remove('show'), 7000);
+  }
+
+  function runPhysics() {
+    const c = Math.max(250, co2 - GR_FACTOR[gr] * 50);
+    const T0 = 1.35 * Math.log2(c / 280) + 0.35 * (ch4 - 0.72);
+    iceF = Math.max(0.05, Math.min(1, 1 - T0 * 0.2));
+    T = Math.max(0, T0 + (1 - iceF) * 0.5);
+    pol = Math.min(100, Math.max(0, T / 4 * 100));
+    acid = Math.min(1, Math.max(0, (c - 280) / 500));
+
+    reef = Math.max(0, Math.min(1, 1 - acid * 0.7 - L.wp / 130 - Math.max(0, T - 1) * 0.15));
+    fish = Math.max(0, Math.min(1, (1 - L.wp / 110 - acid * 0.3) * Math.min(1, (o2 - 19) / 1.5)));
+    trees = Math.max(0, Math.min(1, 1 - L.df / 100 - Math.max(0, T - 1.5) * 0.08));
+    soil = Math.max(0, Math.min(1, 1 - L.pest / 110 - L.df / 400 - Math.max(0, T - 2) * 0.05));
+    slr = T * 0.28 + (1 - iceF) * 0.2;
+    bio = Math.round(25 * (reef + fish + trees + soil));
+
+    $('s1').textContent = (T >= 0 ? '+' : '') + T.toFixed(1) + ' °C';
+    $('s2').textContent = '+' + Math.round(slr * 100) + ' cm';
+    $('s3').textContent = pc(iceF);
+    $('s4').textContent = pc(trees);
+    $('s5').textContent = bio;
+    $('s6').textContent = Math.round(co2) + ' ppm';
+
+    cv.style.setProperty('--p', pol);
+    cv.style.setProperty('--halo', pol > 50 ? '#ff8a4c' : pol > 20 ? '#a8b36a' : '#4aa3ff');
+    TP.forEach(([id, fn, a, b]) => {
+      const hit = fn();
+      if (hit && !tipped[id]) toast('Tipping point: ' + a, b);
+      tipped[id] = hit;
+    });
+    updateMoodAndMask();
+  }
+
+  const INFO = {
+    ocean: ['Ocean', 'Oceans absorb ~90% of excess trapped heat and ~25% of CO₂, which slowly forms carbonic acid (H₂CO₃).'],
+    forest: ['Forest', 'Forests store vast carbon in wood and roots. NASA’s GEDI LiDAR measures canopy height from the ISS.'],
+    soil: ['Soil Life', 'Mycelium networks trade nutrients with plant roots and lock carbon underground.'],
+    ice: ['Polar Ice', 'Bright sea ice and ice sheets reflect solar radiation (high albedo), keeping Earth cool.'],
+    city: ['Megacity & Energy Grid', 'Switching cities from fossil fuels to solar, wind, or nuclear slashes CO₂ and urban smog.']
+  };
+  function setView(k) {
+    view = k;
+    const z = k !== 'orbit', lk = V2L[k];
+    cv.parentElement.classList.toggle('zoom', z);
+    $('back').hidden = !z;
+    $('locw').hidden = !lk;
+    if (lk) { $('loc').value = L[lk]; $('locl').textContent = LBL[k]; }
+    $('grid').hidden = k !== 'city';
+    if (z && INFO[k]) {
+      $('it').textContent = INFO[k][0];
+      $('ib').textContent = INFO[k][1];
+      if (playerChar) showDialogue(playerChar.name, INFO[k][1]);
+    }
+  }
+
+  // =========================================================================
+  // 2. COMPANIONS & 16-BIT PIXEL SPRITE RENDERER
+  // =========================================================================
+  const COMPANIONS = [
+    { name: 'Teo',    skin: '#a8683a', hair: '#3a2216', eye: '#6a8a2a', style: 2, coat: '#2f4832', shirt: '#f3ead2', kind: 0, elf: 0, blip: 330 },
+    { name: 'Willow', skin: '#f2c9a6', hair: '#b98a58', eye: '#5d8a3a', style: 1, coat: '#c9a46a', shirt: '#e6c88e', kind: 1, elf: 1, blip: 520 },
+    { name: 'Rowan',  skin: '#f2c9a6', hair: '#7a5538', eye: '#4f7fb8', style: 0, coat: '#b98f4a', shirt: '#e6d3a0', kind: 0, elf: 1, blip: 400 },
+    { name: 'Ember',  skin: '#f4d0b0', hair: '#d96b27', eye: '#4f9a4a', style: 1, coat: '#6f7a46', shirt: '#4a3a2a', kind: 2, elf: 1, blip: 600 },
+    { name: 'Hazel',  skin: '#f0c4a0', hair: '#a8643c', eye: '#8a9a3a', style: 1, coat: '#c4783e', shirt: '#4a3228', kind: 3, elf: 1, blip: 470 },
+    { name: 'Frost',  skin: '#f2d4bc', hair: '#c5bfd4', eye: '#5b86b8', style: 0, coat: '#e9e2d0', shirt: '#3a2a22', kind: 0, elf: 1, blip: 360 },
+    { name: 'Sage',   skin: '#b97a4c', hair: '#6b4528', eye: '#7a8a2a', style: 3, coat: '#efe8d4', shirt: '#4a5a3a', kind: 3, elf: 1, blip: 560 },
+    { name: 'Moss',   skin: '#e9b998', hair: '#7a4a36', eye: '#5a8a9a', style: 0, coat: '#7d8a3a', shirt: '#4a3a2a', kind: 2, elf: 1, blip: 310 }
+  ];
+
+  let playerChar = null, portraitSpirit = null, portraitTimer = null;
+  let maskOn = false, mood = 'happy';
+
+  function drawPortrait(g, c, currentMood, hasMask, t) {
+    g.clearRect(0, 0, 32, 36);
+    const P = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
+    const spd = { happy: 480, neutral: 680, worried: 210, distressed: 110 }[currentMood] || 500;
+    const by = Math.round(Math.sin(t / spd) * (currentMood === 'happy' ? 1 : 0.6));
+    g.save();
+    g.translate(0, by);
+
+    if (c.kind === 2) { P(5, 24, 22, 12, c.coat); P(12, 26, 8, 10, c.shirt); }
+    else if (c.kind === 1) { P(7, 25, 18, 11, c.coat); P(12, 25, 8, 4, c.shirt); }
+    else if (c.kind === 3) { P(7, 25, 18, 11, c.coat); P(10, 28, 12, 8, c.shirt); }
+    else { P(7, 25, 18, 11, c.shirt); P(7, 25, 4, 11, c.coat); P(21, 25, 4, 11, c.coat); }
+
+    P(14, 22, 4, 4, c.skin);
+    if (c.style === 1) P(6, 9, 20, 20, c.hair);
+    if (c.style === 3) P(6, 9, 20, 7, c.hair);
+    P(9, 9, 14, 13, c.skin);
+    P(10, 21, 12, 2, c.skin);
+    if (c.elf) { P(7, 13, 2, 2, c.skin); P(6, 12, 1, 1, c.skin); P(23, 13, 2, 2, c.skin); P(25, 12, 1, 1, c.skin); }
+
+    if (c.style === 2) { P(7, 4, 18, 8, c.hair); P(6, 6, 2, 7, c.hair); P(24, 6, 2, 7, c.hair); }
+    else P(8, 5, 16, 6, c.hair);
+    P(8, 10, 3, c.style === 1 ? 16 : 4, c.hair);
+    P(21, 10, 3, c.style === 1 ? 16 : 4, c.hair);
+    P(9, 10, 14, 2, c.hair);
+
+    const blink = (t % 3600) < 110;
+    [11, 19].forEach(x => {
+      if (blink) { P(x, 15, 3, 1, '#3a2216'); return; }
+      if (currentMood === 'happy' && !hasMask) {
+        P(x, 14, 3, 3, c.eye); P(x, 14, 1, 1, '#fff'); P(x + 2, 16, 1, 1, '#fff');
+      } else {
+        P(x, 14, 3, 3, '#fff'); P(x + 1, 14, 2, 3, c.eye);
+      }
+    });
+
+    if (currentMood === 'worried' || currentMood === 'distressed') {
+      P(10, 12, 2, 1, c.hair); P(12, 11, 2, 1, c.hair);
+      P(18, 11, 2, 1, c.hair); P(20, 12, 2, 1, c.hair);
+      if ((t % 1400) < 1000) { P(24, 8, 2, 1, '#8fd3ff'); P(23, 9, 4, 2, '#8fd3ff'); }
+    }
+
+    if (hasMask) {
+      P(8, 16, 2, 1, '#b8d0e0'); P(22, 16, 2, 1, '#b8d0e0');
+      P(10, 16, 12, 6, '#eef6fc');
+      P(11, 16, 10, 1, '#9ab8cc'); P(10, 21, 12, 1, '#9ab8cc');
+      P(12, 18, 3, 2, '#73c7d9'); P(17, 18, 3, 2, '#73c7d9');
+    } else {
+      const mk = '#8a3a3a';
+      if (currentMood === 'happy') {
+        P(13, 18, 1, 1, mk); P(14, 19, 4, 1, mk); P(18, 18, 1, 1, mk);
+        P(10, 17, 2, 1, '#f28b8b'); P(20, 17, 2, 1, '#f28b8b');
+      } else if (currentMood === 'neutral') {
+        P(14, 19, 4, 1, mk);
+      } else {
+        P(13, 19, 2, 1, mk); P(15, 20, 2, 1, mk); P(17, 19, 2, 1, mk);
+      }
+    }
+    g.restore();
+  }
+
+  function drawSpiritPortrait(g, sp, t) {
+    g.clearRect(0, 0, 32, 36);
+    const b = Math.round(Math.sin(t / 380) * 1.5);
+    g.save();
+    g.globalAlpha = 0.32; g.fillStyle = sp.glow;
+    g.beginPath(); g.arc(16, 19 + b, 14, 0, 7); g.fill();
+    g.globalAlpha = 1; g.fillStyle = sp.color;
+    g.beginPath(); g.arc(16, 19 + b, 9, 0, 7); g.fill();
+    g.fillStyle = sp.accent; g.fillRect(11, 8 + b, 10, 3); g.fillRect(14, 5 + b, 4, 3);
+    g.fillStyle = '#1e1628'; g.fillRect(12, 17 + b, 2, 3); g.fillRect(18, 17 + b, 2, 3);
+    g.fillStyle = '#6b2938'; g.fillRect(14, 22 + b, 4, 1);
+    g.restore();
+  }
+
+  function drawOverworldPlayer(g, c, x, y, flip, moving, hasMask, t) {
+    const px = Math.round(x), py = Math.round(y);
+    g.fillStyle = 'rgba(0, 0, 0, 0.34)';
+    g.beginPath(); g.ellipse(px, py + 1, 8, 3.2, 0, 0, 7); g.fill();
+    const step = moving ? Math.floor(t / 120) % 2 : 0;
+    const bob = moving ? (step ? -1 : 0) : Math.round(Math.sin(t / 450) * 0.5);
+    g.save(); g.translate(px, py + bob); if (flip) g.scale(-1, 1);
+    const P = (ax, ay, aw, ah, col) => { g.fillStyle = col; g.fillRect(ax, ay, aw, ah); };
+    P(-4, -5, 3, 5 - step, '#362419'); P(1, -5, 3, moving ? 4 + step : 5, '#362419');
+    P(-5, -12, 10, 7, c.coat); P(-2, -12, 4, 7, c.shirt);
+    P(-7, -11 + step, 2, 5, c.coat); P(5, -11 + (1 - step), 2, 5, c.coat);
+    P(-5, -20, 10, 8, c.skin); P(-6, -22, 12, 4, c.hair);
+    P(-6, -19, 2, (c.style === 1 || c.style === 3) ? 7 : 3, c.hair);
+    P(4, -19, 2, (c.style === 1 || c.style === 3) ? 7 : 3, c.hair);
+    P(-3, -17, 2, 2, c.eye); P(2, -17, 2, 2, c.eye);
+    if (hasMask) {
+      P(-4, -15, 8, 3, '#eef6fc'); P(-3, -14, 2, 1, '#73c7d9'); P(1, -14, 2, 1, '#73c7d9');
+    } else {
+      P(-1, -14, 2, 1, '#8a3a3a');
+    }
+    g.restore();
+  }
+
+  // =========================================================================
+  // 3. FIVE INTERCONNECTED 16-BIT ROOMS & NATURE SPIRITS
+  // =========================================================================
+  const W_RPG = 480, H_RPG = 270;
+  const rCanvas = $('game'), rCtx = rCanvas.getContext('2d');
+  const ROOMS = [
+    {
+      id: 0, name: 'I. Industrial Outskirts', shortName: 'Industrial Outskirts',
+      spirit: {
+        name: 'Spark', color: '#ffd25a', glow: '#ff9636', accent: '#fff4b8', x: 240, y: 152,
+        intro: 'Bzzzt! I am Spark, Spirit of Sun & Wind! Four old coal relays choke this valley with smog. Walk to a relay (or press E) to install Solar, Wind, or Hydro blueprints!',
+        win: '100% clean renewable power! Smog cleared, the city grid shifted to renewables, and the bass drone became a warm synth pulse!'
+      },
+      nasaTag: 'OCO-2 CO₂ & Clean Grid Telemetry',
+      layerName: 'Warm Bass Synth Pulse',
+      restored: false, progress: 0,
+      exits: { right: { to: 1, spawnX: 34, spawnY: 195, label: 'Sunlit Meadow →' } },
+      nodes: [
+        { id: 0, terrain: 'Sunny Ridge', best: 'Solar', type: null },
+        { id: 1, terrain: 'Windy Cliff', best: 'Wind',  type: null },
+        { id: 2, terrain: 'High Mesa',   best: 'Solar', type: null },
+        { id: 3, terrain: 'Swift River', best: 'Hydro', type: null }
+      ]
+    },
+    {
+      id: 1, name: 'II. Sunlit Meadow', shortName: 'Sunlit Meadow',
+      spirit: {
+        name: 'Flora', color: '#ff94c2', glow: '#ff5c9d', accent: '#7ce876', x: 240, y: 150,
+        intro: 'Flutter-hi! I am Flora! Guide our pixel bee from flower bud to bud while dodging smog clouds to bloom all 6 wildflowers!',
+        win: 'Every blossom sings! Butterflies returned, forest health rose, and bright flute & harp arpeggios joined the Jukebox!'
+      },
+      nasaTag: 'GEDI Canopy & Pollinator Habitat',
+      layerName: 'Flute & Harp Arpeggio',
+      restored: false, progress: 0,
+      exits: {
+        left:  { to: 0, spawnX: 444, spawnY: 195, label: '← Industrial Outskirts' },
+        down:  { to: 2, spawnX: 240, spawnY: 75,  label: '↓ Root Cavern' },
+        right: { to: 3, spawnX: 34,  spawnY: 195, label: 'Coral Coastline →' }
+      }
+    },
+    {
+      id: 2, name: 'III. Subterranean Root Cavern', shortName: 'Root Cavern',
+      spirit: {
+        name: 'Spore', color: '#d48cff', glow: '#9b42f5', accent: '#6ef7a7', x: 240, y: 148,
+        intro: 'Shhh... I am Spore, Mycelium Guardian. Rotate the glowing fungal tiles to connect tree roots to the deep soil carbon sinks!',
+        win: 'Emerald and gold light flows through the roots! Excess CO₂ is locked underground, unlocking a warm acoustic cello harmony!'
+      },
+      nasaTag: 'SMAP Soil Moisture & Carbon Sink',
+      layerName: 'Warm Acoustic Cello Pad',
+      restored: false, progress: 0,
+      exits: { up: { to: 1, spawnX: 240, spawnY: 235, label: '↑ Sunlit Meadow' } }
+    },
+    {
+      id: 3, name: 'IV. Coral Coastline', shortName: 'Coral Coastline',
+      spirit: {
+        name: 'Tide', color: '#6ce5ff', glow: '#26a6e0', accent: '#ffe680', x: 240, y: 152,
+        intro: 'Splash! I am Tide! Walk over the 6 pieces of washed-up shore litter to collect them, then talk to me (press E) to sort them!',
+        win: 'Sparkling turquoise waves! Water pollution dropped and ocean wave percussion now dances inside the Jukebox!'
+      },
+      nasaTag: 'SWOT Coastal Water & Debris Watch',
+      layerName: 'Ocean Wave & Shaker Percussion',
+      restored: false, progress: 0,
+      exits: {
+        left: { to: 1, spawnX: 444, spawnY: 195, label: '← Sunlit Meadow' },
+        down: { to: 4, spawnX: 240, spawnY: 72,  label: '↓ Deep Reef Sanctuary' }
+      },
+      litter: [
+        { id: 0, name: 'Plastic Bottle', bin: 'Recycle', icon: '🧴', x: 92,  y: 196, collected: false },
+        { id: 1, name: 'Soda Can',       bin: 'Recycle', icon: '🥫', x: 165, y: 222, collected: false },
+        { id: 2, name: 'Banana Peel',    bin: 'Compost', icon: '🍌', x: 220, y: 185, collected: false },
+        { id: 3, name: 'Driftwood',      bin: 'Compost', icon: '🪵', x: 310, y: 215, collected: false },
+        { id: 4, name: 'Glass Jar',      bin: 'Reuse',   icon: '🫙', x: 375, y: 188, collected: false },
+        { id: 5, name: 'Canvas Tote',    bin: 'Reuse',   icon: '👜', x: 425, y: 226, collected: false }
+      ]
+    },
+    {
+      id: 4, name: 'V. Deep Reef Sanctuary', shortName: 'Deep Reef Sanctuary',
+      spirit: {
+        name: 'Nereus', color: '#7efce0', glow: '#29c7ac', accent: '#ff94b8', x: 240, y: 138,
+        intro: 'Greetings! Excess CO₂ formed carbonic acid (H₂CO₃). Gather 5 glowing CaCO₃ shells & kelp orbs for the alchemy cauldron to restore pH 8.1!',
+        win: 'pH 8.1 restored! Corals burst into color, fish schools returned, and the full major-key symphony is unlocked!'
+      },
+      nasaTag: 'PACE Phytoplankton & Ocean pH',
+      layerName: 'Triumphant Major Symphony',
+      restored: false, progress: 0,
+      exits: { up: { to: 3, spawnX: 240, spawnY: 235, label: '↑ Coral Coastline' } },
+      orbs: [
+        { id: 0, label: 'CaCO₃ Shell', x: 75,  y: 165, collected: false },
+        { id: 1, label: 'Kelp Orb',    x: 130, y: 228, collected: false },
+        { id: 2, label: 'CaCO₃ Pearl', x: 240, y: 234, collected: false },
+        { id: 3, label: 'Kelp Orb',    x: 355, y: 224, collected: false },
+        { id: 4, label: 'CaCO₃ Shell', x: 410, y: 162, collected: false }
+      ]
+    }
+  ];
+
+  let currentRoomId = 0;
+  const player = { x: 110, y: 198, targetX: null, targetY: null, flip: false, moving: false };
+  const keys = {};
+  const ambientParticles = Array.from({ length: 60 }, (_, i) => ({
+    x: (i * 73) % W_RPG, y: (i * 41) % H_RPG,
+    vx: 0.15 + (i % 5) * 0.05, vy: -0.1 - (i % 4) * 0.04,
+    size: (i % 2) + 1, phase: i * 0.7
+  }));
+
+  const currentRoom = () => ROOMS[currentRoomId];
+  const restoredCount = () => ROOMS.filter(r => r.restored).length;
+
+  // Effective pollution combines both simulation climate state AND RPG room restoration
+  function effectivePollution() {
+    const r = currentRoom();
+    if (activeMode === 'sim') {
+      return Math.round(Math.max(pol, (co2 - 280) / 5.5));
+    }
+    if (r.restored) return Math.min(22, Math.round(pol * 0.35));
+    const roomBase = [86, 68, 72, 68, 76][r.id];
+    const simInfluence = (pol - 32) * 0.35;
+    return Math.max(8, Math.min(98, Math.round((roomBase + simInfluence) * (1 - r.progress * 0.85))));
+  }
+
+  function updateMoodAndMask() {
+    const effPol = effectivePollution();
+    const shouldMask = effPol > 60;
+    if (shouldMask !== maskOn && playerChar) {
+      maskOn = shouldMask;
+      if (!portraitSpirit) {
+        showDialogue(playerChar.name, maskOn
+          ? 'Cough! Air pollution exceeded 60%—putting on my pixel respirator mask until we clean the air!'
+          : 'Phew! Pollution dropped below 60%—taking off my respirator mask to breathe fresh air!');
+      }
+    }
+    mood = effPol < 28 ? 'happy' : effPol <= 60 ? 'neutral' : 'worried';
+    $('mood-badge').textContent = maskOn
+      ? `😷 Mask On · ${effPol}% Pol`
+      : mood === 'happy' ? '✨ Sparkling · Clean' : `💧 Healing · ${effPol}% Pol`;
+
+    if (activeMode === 'rpg') {
+      $('pol-pct').textContent = effPol + '%';
+      const bar = $('pol-bar');
+      bar.style.width = (100 - effPol) + '%';
+      bar.style.background = effPol > 60 ? '#ff6b57' : effPol > 30 ? '#ffd166' : '#69d87c';
+    }
+    $('quest-count').textContent = `${restoredCount()}/5`;
+  }
+
+  // =========================================================================
+  // 4. SHARED REAL-TIME WEB AUDIO API SONIFICATION ENGINE
+  // =========================================================================
+  let audioCtx = null, audioOn = false, muted = false;
+  let masterGain, lpFilter, waveShaper, analyser;
+  let bassOsc, subOsc, bassGain, noiseGain, padOscs = [];
+  let stepIndex = 0, voiceNarrator = false, trackTimer = null;
+
+  const SCALES = [
+    { name: 'Major Pentatonic', notes: [0, 2, 4, 7, 9],          chord: [0, 4, 7, 9],  qual: 'maj6' },
+    { name: 'Dorian',           notes: [0, 2, 3, 5, 7, 9, 10],   chord: [0, 3, 7, 10], qual: 'm7' },
+    { name: 'Phrygian',         notes: [0, 1, 3, 5, 7, 8, 10],   chord: [0, 3, 7, 8],  qual: 'm♭6' },
+    { name: 'Diminished',       notes: [0, 2, 3, 5, 6, 8, 9, 11], chord: [0, 3, 6, 9], qual: 'dim7' }
+  ];
+  const NOTE_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+  let teleState = { hue: 200, root: 5, tier: 0, bpm: 92 };
+  const sampleCanvas = document.createElement('canvas');
+  sampleCanvas.width = 16; sampleCanvas.height = 16;
+  const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+  function initAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 128;
+
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.45;
+    lpFilter = audioCtx.createBiquadFilter();
+    lpFilter.type = 'lowpass';
+    lpFilter.frequency.value = 1600;
+    waveShaper = audioCtx.createWaveShaper();
+
+    const rev = audioCtx.createConvolver();
+    const len = audioCtx.sampleRate * 1.6;
+    const imp = audioCtx.createBuffer(2, len, audioCtx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = imp.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8);
+    }
+    rev.buffer = imp;
+    const revGain = audioCtx.createGain();
+    revGain.gain.value = 0.26;
+
+    lpFilter.connect(waveShaper);
+    waveShaper.connect(masterGain);
+    waveShaper.connect(rev);
+    rev.connect(revGain);
+    revGain.connect(masterGain);
+    masterGain.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    bassOsc = audioCtx.createOscillator();
+    subOsc = audioCtx.createOscillator();
+    bassGain = audioCtx.createGain();
+    bassOsc.type = 'sawtooth';
+    subOsc.type = 'sine';
+    bassGain.gain.value = 0.12;
+    bassOsc.connect(bassGain);
+    subOsc.connect(bassGain);
+    bassGain.connect(lpFilter);
+    bassOsc.start();
+    subOsc.start();
+
+    const nBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+    const nData = nBuf.getChannelData(0);
+    for (let i = 0; i < nData.length; i++) nData[i] = Math.random() * 2 - 1;
+    const nSrc = audioCtx.createBufferSource();
+    nSrc.buffer = nBuf; nSrc.loop = true;
+    noiseGain = audioCtx.createGain();
+    noiseGain.gain.value = 0.04;
+    nSrc.connect(noiseGain);
+    noiseGain.connect(lpFilter);
+    nSrc.start();
+
+    for (let i = 0; i < 4; i++) {
+      const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+      osc.type = 'triangle'; g.gain.value = 0.04;
+      osc.connect(g); g.connect(lpFilter); osc.start();
+      padOscs.push({ osc, g });
+    }
+  }
+
+  function playNote(freq, type, dur, vol, pan = 0) {
+    if (!audioCtx || !audioOn || muted) return;
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator(), g = audioCtx.createGain(), p = audioCtx.createStereoPanner();
+    osc.type = type; osc.frequency.setValueAtTime(freq, t);
+    p.pan.value = Math.max(-1, Math.min(1, pan));
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(p); p.connect(lpFilter);
+    osc.start(t); osc.stop(t + dur + 0.05);
+  }
+
+  function updateSonification() {
+    const srcCanvas = activeMode === 'rpg' ? rCanvas : (view === 'orbit' ? cv : mv);
+    sampleCtx.drawImage(srcCanvas, 0, 0, 16, 16);
+    const d = sampleCtx.getImageData(0, 0, 16, 16).data;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 128) continue;
+      r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+    }
+    if (n) { r /= n; g /= n; b /= n; }
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), dl = mx - mn;
+    let hue = dl ? (mx === r ? ((g - b) / dl) % 6 : mx === g ? (b - r) / dl + 2 : (r - g) / dl + 4) * 60 : 0;
+    if (hue < 0) hue += 360;
+
+    const effPol = effectivePollution();
+    const health = 1 - effPol / 100;
+    const tier = effPol < 26 ? 0 : effPol < 50 ? 1 : effPol < 72 ? 2 : 3;
+    const root = Math.round(hue / 30) % 12;
+    const bpm = Math.round(74 + health * 48 + restoredCount() * 4);
+    teleState = { hue: Math.round(hue), root, tier, bpm };
+
+    const sc = SCALES[tier];
+    const summary = `Hue ${teleState.hue}° → ${NOTE_NAMES[root]}${sc.qual} · ${bpm} BPM · ${Math.round(co2)} ppm CO₂`;
+    $('tele').textContent = `${summary}\nScale: ${NOTE_NAMES[root]} ${sc.name} · RPG Layers: ${restoredCount()}/5`;
+    $('rpg-tele').textContent = summary;
+
+    if (!audioCtx || !audioOn) return;
+    const t = audioCtx.currentTime;
+    const droneBase = 110 * (co2 / 425);
+    bassOsc.type = ROOMS[0].restored ? 'triangle' : 'sawtooth';
+    bassOsc.frequency.setTargetAtTime(droneBase * 0.5, t, 0.35);
+    subOsc.frequency.setTargetAtTime(droneBase * 0.25, t, 0.35);
+    lpFilter.frequency.setTargetAtTime(500 + health * 2400 + restoredCount() * 320, t, 0.35);
+    noiseGain.gain.setTargetAtTime((effPol / 100) * 0.08 + ((activeMode === 'rpg' && (currentRoomId === 3 || currentRoomId === 4)) ? 0.03 : 0), t, 0.35);
+
+    const k = (effPol / 100) * 18, curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = (1 + k) * x / (1 + k * Math.abs(x)); }
+    waveShaper.curve = curve;
+
+    const baseFreq = 130.81 * Math.pow(2, root / 12);
+    const padVol = ROOMS[2].restored ? 0.065 : 0.03;
+    sc.chord.forEach((deg, i) => {
+      padOscs[i].osc.frequency.setTargetAtTime(baseFreq * Math.pow(2, deg / 12), t, 0.4);
+      padOscs[i].g.gain.setTargetAtTime(padVol, t, 0.4);
+    });
+  }
+
+  function stepSequencer() {
+    if (audioCtx && audioOn && !muted) {
+      const sc = SCALES[teleState.tier];
+      const baseFreq = 130.81 * Math.pow(2, teleState.root / 12);
+      const pat = [0, 2, 4, 2, 5, 4, 2, 1];
+      const deg = sc.notes[pat[stepIndex % pat.length] % sc.notes.length];
+      playNote(baseFreq * 2 * Math.pow(2, deg / 12), 'triangle', 0.45, 0.045, Math.sin(stepIndex * 0.7) * 0.5);
+
+      if (ROOMS[0].restored && stepIndex % 2 === 0) playNote(baseFreq * 0.5, 'sine', 0.32, 0.09, 0);
+      if (ROOMS[1].restored) {
+        const hd = sc.notes[(stepIndex * 2) % sc.notes.length];
+        playNote(baseFreq * 4 * Math.pow(2, hd / 12), 'sine', 0.65, 0.04, Math.cos(stepIndex) * 0.7);
+      }
+      if (ROOMS[3].restored) {
+        if (stepIndex % 4 === 0) playNote(58, 'sine', 0.22, 0.1, 0);
+        if (stepIndex % 2 === 1) playNote(4200, 'square', 0.025, 0.015, 0.45);
+      }
+      if (ROOMS[4].restored && stepIndex % 4 === 0) {
+        const sd = sc.chord[(stepIndex / 4) % sc.chord.length];
+        playNote(baseFreq * 4 * Math.pow(2, sd / 12), 'triangle', 1.1, 0.055, -0.35);
+      }
+      stepIndex++;
+    }
+    setTimeout(stepSequencer, 30000 / Math.max(60, teleState.bpm));
+  }
+  stepSequencer();
+
+  // Close-up canvas (#mv) pixel scanner
+  const scan = { on: false, x: 230, y: 230, t: 0 };
+  function scanAt(c, x, y) {
+    if (!audioCtx || !audioOn || audioCtx.currentTime < scan.t) return;
+    const w = c.getBoundingClientRect();
+    const px = Math.floor(x / w.width * c.width), py = Math.floor(y / w.height * c.height);
+    if (px < 0 || py < 0 || px >= c.width || py >= c.height) return;
+    const d = (c === mv ? mctx : ctx).getImageData(px, py, 1, 1).data;
+    if (d[3] < 128) return;
+    scan.t = audioCtx.currentTime + 0.09;
+    const b = (0.3 * d[0] + 0.59 * d[1] + 0.11 * d[2]) / 255;
+    const sc = SCALES[teleState.tier].notes;
+    const deg = sc[Math.min(sc.length - 1, Math.floor(b * sc.length))];
+    playNote(220 * Math.pow(2, (teleState.root + deg) / 12), d[0] > d[2] + 30 ? 'sawtooth' : 'sine', 0.18, 0.09, x / w.width * 2 - 1);
+  }
+  [cv, mv].forEach(c => c.addEventListener('pointermove', e => {
+    const r = c.getBoundingClientRect(); scanAt(c, e.clientX - r.left, e.clientY - r.top);
+  }));
+  mv.addEventListener('keydown', e => {
+    const d = !e.shiftKey ? 0 : { ArrowLeft: [-24, 0], ArrowRight: [24, 0], ArrowUp: [0, -24], ArrowDown: [0, 24] }[e.key];
+    if (d) {
+      e.preventDefault(); scan.on = true;
+      scan.x = Math.max(0, Math.min(S - 1, scan.x + d[0]));
+      scan.y = Math.max(0, Math.min(S - 1, scan.y + d[1]));
+      const r = mv.getBoundingClientRect(); scanAt(mv, scan.x / S * r.width, scan.y / S * r.height);
+    }
+  });
+
+  function speakText(txt) {
+    $('sr-live').textContent = txt;
+    if (voiceNarrator && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(txt);
+      u.rate = 1.04;
+      window.speechSynthesis.speak(u);
+    }
+  }
+
+  // =========================================================================
+  // 5. DIALOGUE ENGINE
+  // =========================================================================
+  let typeTimer = null;
+  function blipSound() {
+    if (!playerChar || !audioCtx || !audioOn) return;
+    playNote(playerChar.blip * (0.95 + Math.random() * 0.12), 'triangle', 0.05, 0.03, 0);
+  }
+  function showDialogue(speaker, text, spiritObj = null) {
+    clearInterval(typeTimer);
+    $('dialogue-wrap').classList.remove('minimized');
+    $('name-tab').textContent = speaker;
+    portraitSpirit = spiritObj;
+    clearTimeout(portraitTimer);
+    if (spiritObj) {
+      portraitTimer = setTimeout(() => {
+        portraitSpirit = null;
+        if (playerChar) $('name-tab').textContent = playerChar.name;
+      }, 10000);
+    }
+    const el = $('dialogue-text');
+    el.textContent = '';
+    let i = 0;
+    typeTimer = setInterval(() => {
+      el.textContent = text.slice(0, ++i);
+      if (i % 3 === 0 && text[i - 1] !== ' ') blipSound();
+      if (i >= text.length) clearInterval(typeTimer);
+    }, 18);
+    speakText(`${speaker} says: ${text}`);
+  }
+
+  // =========================================================================
+  // 6. 5-ROOM 16-BIT WORLD RENDERING & MINI-GAMES
+  // =========================================================================
+  const particles = Array.from({ length: 55 }, (_, i) => ({
+    x: (i * 73) % W_RPG, y: (i * 41) % H_RPG,
+    vx: 0.15 + (i % 5) * 0.05, vy: -0.1 - (i % 4) * 0.04,
+    size: (i % 2) + 1, phase: i * 0.7
+  }));
+
+  function renderRPGRoom(t) {
+    const r = currentRoom();
+    const clean = 1 - effectivePollution() / 100;
+    rCtx.clearRect(0, 0, W_RPG, H_RPG);
+
+    // Sky & Parallax
+    const skyTop = [
+      mixCol([72, 62, 68], [76, 158, 232], clean),
+      mixCol([118, 128, 112], [92, 184, 245], clean),
+      [24, 18, 42],
+      mixCol([105, 118, 122], [82, 186, 242], clean),
+      [14, 52, 98]
+    ][r.id];
+    const skyBot = [
+      mixCol([132, 112, 92], [184, 226, 248], clean),
+      mixCol([176, 182, 154], [208, 242, 224], clean),
+      [38, 28, 62],
+      mixCol([164, 168, 152], [198, 240, 246], clean),
+      [10, 32, 68]
+    ][r.id];
+    const grad = rCtx.createLinearGradient(0, 0, 0, H_RPG);
+    grad.addColorStop(0, rgb(skyTop)); grad.addColorStop(1, rgb(skyBot));
+    rCtx.fillStyle = grad; rCtx.fillRect(0, 0, W_RPG, H_RPG);
+
+    if (r.id === 0) {
+      rCtx.fillStyle = rgb(mixCol([92, 82, 72], [86, 156, 78], clean));
+      rCtx.fillRect(0, 115, W_RPG, H_RPG - 115);
+      rCtx.fillStyle = rgb(mixCol([78, 86, 76], [46, 152, 214], clean));
+      rCtx.fillRect(350, 115, 85, H_RPG - 115);
+      r.nodes.forEach((nd, i) => {
+        const nx = 95 + i * 95, ny = i === 3 ? 215 : 132;
+        nd.x = nx; nd.y = ny;
+        rCtx.fillStyle = '#2d2636'; rCtx.fillRect(nx - 16, ny - 6, 32, 12);
+        rCtx.strokeStyle = nd.type ? '#7af59b' : '#ff9254'; rCtx.strokeRect(nx - 16, ny - 6, 32, 12);
+        rCtx.fillStyle = nd.type === 'Solar' ? '#2563eb' : nd.type === 'Wind' ? '#f8fafc' : nd.type === 'Hydro' ? '#f59e0b' : '#64748b';
+        rCtx.fillRect(nx - 8, ny - 18, 16, 12);
+      });
+    } else if (r.id === 1) {
+      rCtx.fillStyle = rgb(mixCol([106, 122, 74], [78, 174, 84], clean));
+      rCtx.fillRect(0, 112, W_RPG, H_RPG - 112);
+      for (let i = 0; i < 42; i++) {
+        const gx = (i * 39 + 17) % W_RPG, gy = 122 + ((i * 29) % 138), sw = Math.sin(t / 450 + i) * 2;
+        rCtx.fillStyle = clean > 0.5 ? '#3b9e47' : '#697546';
+        rCtx.fillRect(gx + sw, gy - 5, 2, 5);
+        if (clean > 0.35 && i % 3 === 0) {
+          rCtx.fillStyle = ['#ff7eb6', '#ffe066', '#9be7ff'][i % 3];
+          rCtx.fillRect(gx + sw - 1, gy - 7, 4, 3);
+        }
+      }
+      if (r.restored) {
+        for (let i = 0; i < 10; i++) {
+          const bx = (i * 53 + t * 0.03) % W_RPG, by = 90 + (i % 5) * 26 + Math.cos(t / 240 + i) * 8;
+          rCtx.fillStyle = i % 2 ? '#ffe66d' : '#ff8fab';
+          rCtx.fillRect(bx, by, 4, 3);
+        }
+      }
+    } else if (r.id === 2) {
+      rCtx.fillStyle = '#33254a'; rCtx.fillRect(20, 62, W_RPG - 40, H_RPG - 76);
+      rCtx.strokeStyle = clean > 0.6 ? '#5ef29c' : '#8562b8'; rCtx.lineWidth = 2;
+      for (let i = 0; i < 10; i++) {
+        const x1 = 45 + i * 42;
+        rCtx.beginPath(); rCtx.moveTo(x1, 80); rCtx.lineTo(x1 + Math.sin(i * 2) * 25, 165); rCtx.lineTo(x1 - 12, 245); rCtx.stroke();
+        rCtx.fillStyle = clean > 0.6 ? '#ffd866' : '#c084fc';
+        rCtx.beginPath(); rCtx.arc(x1, 150 + (i % 3) * 28, 5, Math.PI, 0); rCtx.fill();
+      }
+    } else if (r.id === 3) {
+      rCtx.fillStyle = rgb(mixCol([96, 88, 64], [32, 188, 212], clean));
+      rCtx.fillRect(0, 108, W_RPG, 68);
+      rCtx.fillStyle = rgb(mixCol([172, 154, 120], [244, 219, 158], clean));
+      rCtx.fillRect(0, 168, W_RPG, H_RPG - 168);
+      r.litter.forEach(item => {
+        if (item.collected) return;
+        rCtx.font = '14px serif'; rCtx.textAlign = 'center';
+        rCtx.fillText(item.icon, item.x, item.y + Math.sin(t / 300 + item.id) * 1.5);
+      });
+    } else if (r.id === 4) {
+      rCtx.fillStyle = rgb(mixCol([132, 134, 128], [218, 198, 148], clean));
+      rCtx.fillRect(0, 195, W_RPG, H_RPG - 195);
+      const pal = ['#ff6b9d', '#ff9f43', '#a55eea', '#ff5e7e', '#feca57'];
+      for (let i = 0; i < 12; i++) {
+        const cx = 36 + i * 38, cy = 204 + (i % 2) * 12;
+        const hex = pal[i % 5];
+        rCtx.fillStyle = rgb(mixCol([224, 224, 218], [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)], clean));
+        rCtx.beginPath(); rCtx.arc(cx, cy - 8, 9, 0, 7); rCtx.fill();
+      }
+      rCtx.fillStyle = '#475569'; rCtx.beginPath(); rCtx.arc(240, 186, 18, 0, Math.PI); rCtx.fill();
+      rCtx.fillStyle = '#e0f2fe'; rCtx.font = 'bold 8px monospace'; rCtx.textAlign = 'center';
+      rCtx.fillText(`pH ${(7.7 + clean * 0.4).toFixed(1)} · CO₂+H₂O⇌H₂CO₃`, 240, 172);
+      r.orbs.forEach(orb => {
+        if (orb.collected) return;
+        rCtx.fillStyle = orb.id % 2 === 0 ? '#fff5d6' : '#5ef29c';
+        rCtx.beginPath(); rCtx.arc(orb.x, orb.y + Math.sin(t / 280 + orb.id) * 2.5, 5, 0, 7); rCtx.fill();
+      });
+    }
+
+    // Spirit & Edge Portals
+    const sp = r.spirit, bob = Math.sin(t / 340) * 3;
+    rCtx.save();
+    rCtx.globalAlpha = 0.3; rCtx.fillStyle = sp.glow;
+    rCtx.beginPath(); rCtx.arc(sp.x, sp.y - 10 + bob, 14, 0, 7); rCtx.fill();
+    rCtx.globalAlpha = 1; rCtx.fillStyle = sp.color;
+    rCtx.beginPath(); rCtx.arc(sp.x, sp.y - 10 + bob, 7, 0, 7); rCtx.fill();
+    if (Math.hypot(player.x - sp.x, player.y - sp.y) < 38) {
+      rCtx.fillStyle = 'rgba(18,12,26,0.9)'; rCtx.fillRect(sp.x - 26, sp.y - 31 + bob, 52, 11);
+      rCtx.fillStyle = '#ffe89e'; rCtx.font = 'bold 7px monospace'; rCtx.textAlign = 'center';
+      rCtx.fillText('[E] ' + sp.name, sp.x, sp.y - 23 + bob);
+    }
+    rCtx.restore();
+
+    rCtx.fillStyle = 'rgba(255, 224, 115, 0.85)'; rCtx.font = 'bold 7px monospace'; rCtx.textAlign = 'center';
+    if (r.exits.left)  { rCtx.fillRect(2, 175, 8, 38); rCtx.fillText('◀', 15, 196); }
+    if (r.exits.right) { rCtx.fillRect(W_RPG - 10, 175, 8, 38); rCtx.fillText('▶', W_RPG - 15, 196); }
+    if (r.exits.down)  { rCtx.fillRect(216, H_RPG - 10, 48, 8); rCtx.fillText('▼', 240, H_RPG - 14); }
+    if (r.exits.up)    { rCtx.fillRect(216, 62, 48, 8); rCtx.fillText('▲', 240, 58); }
+
+    if (playerChar) drawOverworldPlayer(rCtx, playerChar, player.x, player.y, player.flip, player.moving, maskOn, t);
+
+    ambientParticles.forEach(p => {
+      p.x = (p.x + p.vx + W_RPG) % W_RPG;
+      p.y = (p.y + (r.id === 4 ? -Math.abs(p.vy) : p.vy) + H_RPG) % H_RPG;
+      rCtx.fillStyle = clean < 0.45 && r.id !== 2 ? 'rgba(70,62,58,0.45)' : 'rgba(255,242,150,0.65)';
+      rCtx.fillRect(p.x, p.y, p.size, p.size);
+    });
+  }
+
+  function enterRoom(roomId, spawnX = 110, spawnY = 198) {
+    currentRoomId = roomId;
+    player.x = spawnX; player.y = spawnY;
+    player.targetX = null; player.targetY = null;
+    const r = currentRoom();
+    $('room-title').textContent = r.name;
+    updateMoodAndMask();
+    if (!r.visited) {
+      r.visited = true;
+      showDialogue(r.spirit.name, r.spirit.intro, r.spirit);
+    } else if (playerChar) {
+      showDialogue(playerChar.name, r.restored
+        ? `We're back in ${r.shortName}! Everything is thriving.`
+        : `We're in ${r.shortName}. Speak with ${r.spirit.name} or press E to restore this zone!`);
+    }
+  }
+
+  function updateRPGPlayer(dt) {
+    if (activeMode !== 'rpg' || !$('minigame-overlay').hidden || !$('modal-kharita').hidden || !$('modal-quests').hidden || !$('onboarding').hidden) {
+      player.moving = false; return;
+    }
+    let vx = 0, vy = 0;
+    if (keys['w'] || keys['arrowup']) vy -= 1;
+    if (keys['s'] || keys['arrowdown']) vy += 1;
+    if (keys['a'] || keys['arrowleft']) vx -= 1;
+    if (keys['d'] || keys['arrowright']) vx += 1;
+
+    if (vx || vy) {
+      player.targetX = null; player.targetY = null;
+      const len = Math.hypot(vx, vy); vx /= len; vy /= len;
+    } else if (player.targetX !== null) {
+      const dx = player.targetX - player.x, dy = player.targetY - player.y, dist = Math.hypot(dx, dy);
+      if (dist < 3) { player.targetX = null; player.targetY = null; }
+      else { vx = dx / dist; vy = dy / dist; }
+    }
+
+    player.moving = !!(vx || vy);
+    if (player.moving) {
+      if (vx < -0.05) player.flip = true;
+      if (vx > 0.05) player.flip = false;
+      player.x = Math.max(8, Math.min(W_RPG - 8, player.x + vx * 115 * dt));
+      player.y = Math.max(70, Math.min(H_RPG - 8, player.y + vy * 115 * dt));
+    }
+
+    const r = currentRoom();
+    if (r.id === 3 && !r.restored) {
+      r.litter.forEach(item => {
+        if (!item.collected && Math.hypot(player.x - item.x, player.y - item.y) < 18) {
+          item.collected = true;
+          const got = r.litter.filter(x => x.collected).length;
+          r.progress = (got / r.litter.length) * 0.5;
+          playNote(660 + got * 45, 'sine', 0.18, 0.08, 0);
+          updateMoodAndMask();
+          showDialogue(playerChar.name, got === r.litter.length
+            ? 'All 6 shore items collected! Talk to Tide (press E) to sort them!'
+            : `Picked up ${item.icon} ${item.name} (${got}/${r.litter.length})!`);
+        }
+      });
+    }
+    if (r.id === 4 && !r.restored) {
+      r.orbs.forEach(orb => {
+        if (!orb.collected && Math.hypot(player.x - orb.x, player.y - orb.y) < 18) {
+          orb.collected = true;
+          const got = r.orbs.filter(x => x.collected).length;
+          r.progress = (got / r.orbs.length) * 0.65;
+          playNote(523 + got * 60, 'triangle', 0.25, 0.08, 0);
+          updateMoodAndMask();
+          showDialogue(playerChar.name, got === r.orbs.length
+            ? 'All 5 CaCO₃ & Kelp Orbs collected! Press E by the cauldron to balance ocean pH!'
+            : `Collected ${orb.label} (${got}/${r.orbs.length})!`);
+        }
+      });
+    }
+
+    const nearSpirit = Math.hypot(player.x - r.spirit.x, player.y - r.spirit.y) < 42;
+    const nearNode = r.id === 0 && r.nodes.some(n => Math.hypot(player.x - n.x, player.y - n.y) < 34);
+    const nearCauldron = r.id === 4 && Math.hypot(player.x - 240, player.y - 186) < 40;
+    $('btn-interact').hidden = !(nearSpirit || nearNode || nearCauldron);
+
+    if (r.exits.left && player.x <= 12 && player.y > 165 && player.y < 220) enterRoom(r.exits.left.to, r.exits.left.spawnX, r.exits.left.spawnY);
+    else if (r.exits.right && player.x >= W_RPG - 12 && player.y > 165 && player.y < 220) enterRoom(r.exits.right.to, r.exits.right.spawnX, r.exits.right.spawnY);
+    else if (r.exits.down && player.y >= H_RPG - 10 && Math.abs(player.x - 240) < 28) enterRoom(r.exits.down.to, r.exits.down.spawnX, r.exits.down.spawnY);
+    else if (r.exits.up && player.y <= 72 && Math.abs(player.x - 240) < 28) enterRoom(r.exits.up.to, r.exits.up.spawnX, r.exits.up.spawnY);
+  }
+
+  // Bi-directional Sync: Restoring an RPG biome actively heals the Global Simulation!
+  function completeBiome(room) {
+    if (room.restored) return;
+    room.restored = true;
+    room.progress = 1;
+
+    // Heal corresponding simulation parameters
+    co2 = Math.max(280, co2 - 28);
+    if (room.id === 0) {
+      gr = 'solar';
+      document.querySelectorAll('[data-g]').forEach(x => x.classList.toggle('on', x.dataset.g === 'solar'));
+    } else if (room.id === 1) {
+      L.df = Math.max(0, L.df - 12);
+    } else if (room.id === 2) {
+      L.pest = Math.max(0, L.pest - 14);
+      co2 = Math.max(280, co2 - 15);
+    } else if (room.id === 3) {
+      L.wp = Math.max(0, L.wp - 15);
+    } else if (room.id === 4) {
+      L.wp = 0;
+      o2 = Math.min(21.2, o2 + 0.15);
+    }
+    syncControls();
+    updateSonification();
+
+    playNote(523.25, 'triangle', 0.5, 0.1, -0.4);
+    setTimeout(() => playNote(659.25, 'triangle', 0.5, 0.1, 0), 110);
+    setTimeout(() => playNote(783.99, 'triangle', 0.7, 0.11, 0.4), 220);
+
+    const total = restoredCount();
+    showDialogue(room.spirit.name, `${room.spirit.win} (${total}/5 Biomes Restored · Unlocked: ${room.layerName})`, room.spirit);
+  }
+
+  function openMiniGame() {
+    const r = currentRoom();
+    const overlay = $('minigame-overlay'), body = $('mg-body');
+    overlay.hidden = false;
+
+    if (r.id === 0) {
+      $('mg-title').textContent = '⚡ Spark’s Renewable Grid Switch';
+      const renderGrid = () => {
+        const done = r.nodes.filter(n => n.type).length;
+        r.progress = done / r.nodes.length;
+        updateMoodAndMask();
+        body.innerHTML = `<p style="margin-top:0;font-size:13px">Install clean energy blueprints on all 4 relays (${done}/4 active):</p>
+          <div class="mg-grid">${r.nodes.map(nd => `
+            <div class="mg-slot"><h3>Node #${nd.id + 1}: ${nd.terrain}</h3><p>Best: <strong>${nd.best}</strong></p>
+              ${['Solar', 'Wind', 'Hydro'].map(opt => `<button class="mg-choice ${nd.type === opt ? 'chosen' : ''}" data-nid="${nd.id}" data-opt="${opt}">${opt}</button>`).join('')}
+            </div>`).join('')}</div>`;
+        body.querySelectorAll('.mg-choice').forEach(btn => {
+          btn.onclick = () => {
+            r.nodes[+btn.dataset.nid].type = btn.dataset.opt;
+            playNote(440 + (+btn.dataset.nid) * 90, 'triangle', 0.25, 0.08, 0);
+            renderGrid();
+            if (r.nodes.every(n => n.type)) setTimeout(() => { overlay.hidden = true; completeBiome(r); }, 350);
+          };
+        });
+      };
+      renderGrid();
+    } else if (r.id === 1) {
+      $('mg-title').textContent = '🐝 Flora’s Bee & Blossom Flight Path';
+      body.innerHTML = `<p style="margin-top:0;font-size:13px">Guide the pixel bee across all <strong>6 flower buds</strong> while dodging dark smog pockets!</p>
+        <canvas id="bee-canvas" width="560" height="250"></canvas>
+        <p id="bee-status" style="margin:6px 0 0;font-size:12px;color:var(--gold-bright)">Flowers bloomed: 0 / 6</p>`;
+      const bc = $('bee-canvas'), bx = bc.getContext('2d');
+      const bee = { x: 45, y: 125, tx: 45, ty: 125 };
+      const flowers = [
+        { x: 135, y: 60, bloom: false, note: 523.25 }, { x: 225, y: 190, bloom: false, note: 587.33 },
+        { x: 315, y: 72, bloom: false, note: 659.25 }, { x: 395, y: 185, bloom: false, note: 783.99 },
+        { x: 470, y: 76, bloom: false, note: 880.00 }, { x: 515, y: 170, bloom: false, note: 1046.5 }
+      ];
+      const smogs = [{ x: 180, y: 125, vy: 1.5 }, { x: 355, y: 125, vy: -1.7 }];
+      bc.onpointermove = e => {
+        const rect = bc.getBoundingClientRect();
+        bee.tx = (e.clientX - rect.left) / rect.width * bc.width;
+        bee.ty = (e.clientY - rect.top) / rect.height * bc.height;
+      };
+      let alive = true;
+      function beeLoop() {
+        if (!alive || overlay.hidden) return;
+        if (keys['arrowleft'] || keys['a']) bee.tx -= 4;
+        if (keys['arrowright'] || keys['d']) bee.tx += 4;
+        if (keys['arrowup'] || keys['w']) bee.ty -= 4;
+        if (keys['arrowdown'] || keys['s']) bee.ty += 4;
+        bee.tx = Math.max(16, Math.min(544, bee.tx)); bee.ty = Math.max(16, Math.min(234, bee.ty));
+        bee.x += (bee.tx - bee.x) * 0.18; bee.y += (bee.ty - bee.y) * 0.18;
+        bx.fillStyle = '#6ec265'; bx.fillRect(0, 0, 560, 250);
+        smogs.forEach(s => {
+          s.y += s.vy; if (s.y < 32 || s.y > 218) s.vy *= -1;
+          bx.fillStyle = 'rgba(48,42,54,0.85)'; bx.beginPath(); bx.arc(s.x, s.y, 22, 0, 7); bx.fill();
+          if (Math.hypot(bee.x - s.x, bee.y - s.y) < 26) { bee.x = 45; bee.y = 125; bee.tx = 45; bee.ty = 125; }
+        });
+        let count = 0;
+        flowers.forEach(fl => {
+          if (!fl.bloom && Math.hypot(bee.x - fl.x, bee.y - fl.y) < 24) { fl.bloom = true; playNote(fl.note, 'sine', 0.4, 0.1, 0); }
+          if (fl.bloom) count++;
+          bx.fillStyle = '#2d7a36'; bx.fillRect(fl.x - 2, fl.y, 4, 18);
+          bx.fillStyle = fl.bloom ? '#ff7eb6' : '#d6c89e';
+          bx.beginPath(); bx.arc(fl.x, fl.y, fl.bloom ? 14 : 8, 0, 7); bx.fill();
+        });
+        r.progress = count / flowers.length; updateMoodAndMask();
+        $('bee-status').textContent = `Flowers bloomed: ${count} / 6`;
+        bx.fillStyle = '#ffd43b'; bx.beginPath(); bx.ellipse(bee.x, bee.y, 11, 8, 0, 0, 7); bx.fill();
+        bx.fillStyle = '#2b2118'; bx.fillRect(bee.x - 4, bee.y - 7, 3, 14); bx.fillRect(bee.x + 2, bee.y - 7, 3, 14);
+        if (count === flowers.length) { alive = false; setTimeout(() => { overlay.hidden = true; completeBiome(r); }, 350); return; }
+        requestAnimationFrame(beeLoop);
+      }
+      requestAnimationFrame(beeLoop);
+    } else if (r.id === 2) {
+      $('mg-title').textContent = '🍄 Spore’s Carbon Sink Mycelium Network';
+      const grid = [
+        { mask: 6, rot: 1 }, { mask: 10, rot: 1 }, { mask: 12, rot: 2 }, { mask: 4, rot: 0 },
+        { mask: 5, rot: 1 }, { mask: 9, rot: 2 }, { mask: 5, rot: 1 }, { mask: 12, rot: 1 },
+        { mask: 3, rot: 1 }, { mask: 10, rot: 0 }, { mask: 3, rot: 2 }, { mask: 9, rot: 1 }
+      ];
+      const rotMask = (m, st) => {
+        let res = m;
+        for (let i = 0; i < st; i++) res = ((res & 1) << 1) | ((res & 2) << 1) | ((res & 4) << 1) | ((res & 8) >> 3);
+        return res;
+      };
+      const checkConnected = () => {
+        const vis = new Set([0]), q = [0];
+        while (q.length) {
+          const idx = q.shift(), x = idx % 4, y = Math.floor(idx / 4), m = rotMask(grid[idx].mask, grid[idx].rot);
+          [[0, -1, 1, 4], [1, 0, 2, 8], [0, 1, 4, 1], [-1, 0, 8, 2]].forEach(([dx, dy, bit, opp]) => {
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && nx < 4 && ny >= 0 && ny < 3) {
+              const ni = ny * 4 + nx, nm = rotMask(grid[ni].mask, grid[ni].rot);
+              if ((m & bit) && (nm & opp) && !vis.has(ni)) { vis.add(ni); q.push(ni); }
+            }
+          });
+        }
+        return vis;
+      };
+      const renderPipes = () => {
+        const pow = checkConnected();
+        r.progress = Math.min(0.95, pow.size / 12); updateMoodAndMask();
+        body.innerHTML = `<p style="margin-top:0;font-size:13px">Click glowing fungal tiles to rotate 90° and connect <strong>🌳 Tree Root</strong> (top-left) to <strong>💎 Deep Soil Carbon Sink</strong> (bottom-right):</p><div id="pipe-board"></div>`;
+        const board = $('pipe-board');
+        grid.forEach((cell, idx) => {
+          const div = document.createElement('button');
+          div.className = 'pipe-cell' + (pow.has(idx) ? ' powered' : '');
+          const pc = document.createElement('canvas'); pc.width = 28; pc.height = 28;
+          const pg = pc.getContext('2d'), m = rotMask(cell.mask, cell.rot);
+          pg.fillStyle = pow.has(idx) ? '#69f59b' : '#b287f5'; pg.fillRect(11, 11, 6, 6);
+          if (m & 1) pg.fillRect(11, 0, 6, 14); if (m & 2) pg.fillRect(14, 11, 14, 6);
+          if (m & 4) pg.fillRect(11, 14, 6, 14); if (m & 8) pg.fillRect(0, 11, 14, 6);
+          if (idx === 0) { pg.fillStyle = '#ffe066'; pg.fillRect(9, 9, 10, 10); }
+          if (idx === 11) { pg.fillStyle = '#5ef2ff'; pg.fillRect(9, 9, 10, 10); }
+          div.appendChild(pc);
+          div.onclick = () => {
+            cell.rot = (cell.rot + 1) % 4; playNote(392 + idx * 18, 'triangle', 0.14, 0.06, 0);
+            renderPipes();
+            if (checkConnected().has(11)) setTimeout(() => { overlay.hidden = true; completeBiome(r); }, 350);
+          };
+          board.appendChild(div);
+        });
+      };
+      renderPipes();
+    } else if (r.id === 3) {
+      const col = r.litter.filter(i => i.collected);
+      if (col.length < r.litter.length) {
+        $('mg-title').textContent = '🏖️ Tide’s Shore Patrol';
+        body.innerHTML = `<p>Walk along the sandy shoreline to gather all <strong>${r.litter.length} pieces of washed-up litter</strong> first! (${col.length}/${r.litter.length} collected)</p>`;
+        return;
+      }
+      $('mg-title').textContent = '♻️ Tide’s Beach Waste Sorting';
+      let idx = 0;
+      const renderSort = () => {
+        if (idx >= col.length) { overlay.hidden = true; completeBiome(r); return; }
+        const item = col[idx];
+        r.progress = 0.5 + (idx / col.length) * 0.5; updateMoodAndMask();
+        body.innerHTML = `<p style="margin-top:0;font-size:13px">Sort item ${idx + 1}/${col.length} into the proper eco-bin:</p>
+          <div style="text-align:center;padding:12px;background:#1b1326;border:2px solid var(--gold);border-radius:10px">
+            <div style="font-size:38px">${item.icon}</div><strong style="color:var(--gold-bright)">${item.name}</strong>
+            <p id="sort-hint" style="margin:4px 0 0;font-size:12px;color:#cbb894">Choose Recycle, Compost, or Reuse:</p>
+          </div>
+          <div class="sort-bins">
+            <button class="bin-btn" data-bin="Recycle">♻️ Recycle</button>
+            <button class="bin-btn" data-bin="Compost">🌱 Compost</button>
+            <button class="bin-btn" data-bin="Reuse">🔄 Reuse</button>
+          </div>`;
+        body.querySelectorAll('.bin-btn').forEach(btn => {
+          btn.onclick = () => {
+            if (btn.dataset.bin === item.bin) { playNote(587 + idx * 50, 'sine', 0.25, 0.08, 0); idx++; renderSort(); }
+            else { playNote(160, 'sawtooth', 0.2, 0.07, 0); $('sort-hint').textContent = `Hint: ${item.name} belongs in ${item.bin}!`; }
+          };
+        });
+      };
+      renderSort();
+    } else if (r.id === 4) {
+      const col = r.orbs.filter(o => o.collected);
+      if (col.length < r.orbs.length) {
+        $('mg-title').textContent = '🪸 Nereus’s Reef Gathering';
+        body.innerHTML = `<p>Swim around the reef sanctuary to gather all <strong>${r.orbs.length} glowing CaCO₃ shells &amp; kelp orbs</strong> first! (${col.length}/${r.orbs.length} collected)</p>`;
+        return;
+      }
+      $('mg-title').textContent = '⚗️ Coral Reef pH Balancer (CO₂ + H₂O ⇌ H₂CO₃)';
+      let added = 0;
+      const renderAlchemy = () => {
+        const ph = (7.7 + (added / col.length) * 0.4).toFixed(2);
+        r.progress = 0.65 + (added / col.length) * 0.35; updateMoodAndMask();
+        body.innerHTML = `<p style="margin-top:0;font-size:13px">Add Calcium Carbonate (CaCO₃) and kelp orbs to restore ocean pH to <strong>8.10</strong>:</p>
+          <div style="text-align:center;padding:12px;background:#13243b;border:2px solid #67d6ff;border-radius:10px;margin-bottom:10px">
+            <div style="font-size:13px;color:#93e4ff">CO₂ + H₂O ⇌ H₂CO₃ ⇌ H⁺ + HCO₃⁻</div>
+            <div style="font-size:20px;font-weight:bold;color:#69f59b;margin-top:4px">Current Reef pH: ${ph}</div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
+            ${col.map((o, i) => `<button class="dlg-btn ${i < added ? 'primary' : ''}" data-oidx="${i}" ${i !== added ? 'disabled' : ''}>${i < added ? '✅ Buffered' : '✨ Add ' + o.label}</button>`).join('')}
+          </div>`;
+        body.querySelectorAll('[data-oidx]').forEach(btn => {
+          btn.onclick = () => {
+            added++; playNote(440 + added * 85, 'sine', 0.35, 0.09, 0); renderAlchemy();
+            if (added === col.length) setTimeout(() => { overlay.hidden = true; completeBiome(r); }, 400);
+          };
+        });
+      };
+      renderAlchemy();
+    }
+  }
+
+  // =========================================================================
+  // 7. MODE SWITCHING, CONTROLS, SCROLLS & ONBOARDING
+  // =========================================================================
+  function switchMode(mode) {
+    activeMode = mode;
+    const isRPG = mode === 'rpg';
+    document.body.classList.toggle('rpg-active', isRPG);
+    $('sim-view').hidden = isRPG;
+    $('timeline-bar').hidden = isRPG;
+    $('rpg-view').hidden = !isRPG;
+    $('tab-sim').classList.toggle('active-mode', !isRPG);
+    $('tab-rpg').classList.toggle('active-mode', isRPG);
+    $('tab-sim').setAttribute('aria-selected', String(!isRPG));
+    $('tab-rpg').setAttribute('aria-selected', String(isRPG));
+    updateMoodAndMask();
+    if (isRPG) {
+      enterRoom(currentRoomId, player.x, player.y);
+      rCanvas.focus();
+    } else {
+      $('btn-interact').hidden = true;
+      if (playerChar) showDialogue(playerChar.name, 'Welcome back to Earth Orbit & Lab! Adjust the climate sliders or scrub the 1750–2100 timeline.');
+    }
+  }
+
+  $('tab-sim').onclick = () => switchMode('sim');
+  $('tab-rpg').onclick = () => switchMode('rpg');
+  $('launch-rpg-inline').onclick = () => switchMode('rpg');
+
+  // Simulation controls
+  const SET = { co2: v => co2 = v, ch4: v => ch4 = v, o2: v => o2 = v };
+  for (const k in SET) $(k).oninput = e => { SET[k](+e.target.value); syncControls(); };
+  $('yr').oninput = e => { clearInterval(trackTimer); setYear(+e.target.value); };
+  $('iv').onchange = e => { interv = e.target.checked; setYear(year); };
+  $('loc').oninput = e => { L[V2L[view]] = +e.target.value; runPhysics(); };
+  document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => {
+    gr = b.dataset.g; runPhysics();
+    document.querySelectorAll('[data-g]').forEach(x => x.classList.toggle('on', x === b));
+  });
+  document.querySelectorAll('[data-k]').forEach(b => b.onclick = () => setView(b.dataset.k));
+  $('back').onclick = () => setView('orbit');
+
+  let moved = 0;
+  cv.onpointerdown = e => { drag = e.clientX; moved = 0; cv.setPointerCapture(e.pointerId); auto = false; };
+  cv.onpointermove = e => { if (drag !== null) { const dx = e.clientX - drag; moved += Math.abs(dx); rot -= dx * 0.01; drag = e.clientX; } };
+  cv.onpointerup = e => {
+    drag = null;
+    if (moved < 5) {
+      const r = cv.getBoundingClientRect();
+      const s = sampleGlobe(((e.clientX - r.left) / r.width - 0.5) * 2, -(((e.clientY - r.top) / r.height) - 0.5) * 2);
+      if (s) setView(s.k === 'desert' ? 'soil' : s.k);
+    }
+  };
+  cv.onkeydown = e => { if (e.key === 'ArrowLeft') rot += 0.15; if (e.key === 'ArrowRight') rot -= 0.15; auto = false; };
+
+  // NASA Jukebox Tracks
+  document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
+    clearInterval(trackTimer);
+    const n = +b.dataset.t;
+    document.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('on', +x.dataset.t === n));
+    setView(['', 'ocean', 'forest', 'soil', 'orbit'][n]);
+    if (n === 4) {
+      let y = 1750; setYear(y);
+      trackTimer = setInterval(() => { setYear(++y); if (y >= 2100) clearInterval(trackTimer); }, 90);
+    }
+  });
+
+  // Sound, Voice, Kharita, Quest Scroll
+  $('btn-sound').onclick = () => {
+    initAudio(); audioOn = !audioOn;
+    if (audioOn && audioCtx.state === 'suspended') audioCtx.resume();
+    if (!audioOn && audioCtx.state === 'running') audioCtx.suspend();
+    $('btn-sound').textContent = audioOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+    $('btn-sound').setAttribute('aria-pressed', String(audioOn));
+  };
+  $('mt').onclick = () => {
+    muted = !muted;
+    $('mt').setAttribute('aria-pressed', String(muted));
+    $('mt').textContent = muted ? '🔊 Unmute' : '🔇 Mute Audio';
+  };
+  $('btn-voice').onclick = () => {
+    voiceNarrator = !voiceNarrator;
+    $('btn-voice').textContent = voiceNarrator ? '🗣️ Narrator: On' : '🗣️ Narrator: Off';
+    $('btn-voice').setAttribute('aria-pressed', String(voiceNarrator));
+    if (voiceNarrator) speakText('Voice narrator enabled.');
+  };
+
+  $('btn-kharita').onclick = () => { $('modal-kharita').hidden = false; };
+  $('close-kharita').onclick = () => { $('modal-kharita').hidden = true; };
+  document.querySelectorAll('[data-ktab]').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('[data-ktab]').forEach(b => b.classList.toggle('active', b === btn));
+      ['nasa', 'chem', 'history'].forEach(t => { $('ktab-' + t).hidden = t !== btn.dataset.ktab; });
+    };
+  });
+
+  function renderQuestScroll() {
+    $('quest-list').innerHTML = ROOMS.map(r => `
+      <div class="quest-item ${r.restored ? 'done' : ''}">
+        <div>
+          <strong>${r.restored ? '✅' : '⬜'} ${r.name}</strong> — <em>Spirit: ${r.spirit.name}</em><br>
+          <small>NASA Data: ${r.nasaTag} · Jukebox Stem: <strong>${r.layerName}</strong></small>
+        </div>
+        <button class="mode-btn rpg-pill" data-warp="${r.id}">🧭 Travel</button>
+      </div>
+    `).join('');
+    $('quest-list').querySelectorAll('[data-warp]').forEach(btn => {
+      btn.onclick = () => {
+        $('modal-quests').hidden = true;
+        switchMode('rpg');
+        enterRoom(+btn.dataset.warp, 110, 198);
+      };
+    });
+  }
+  $('btn-quests').onclick = () => { renderQuestScroll(); $('modal-quests').hidden = false; };
+  $('close-quests').onclick = () => { $('modal-quests').hidden = true; };
+  $('mg-close').onclick = () => { $('minigame-overlay').hidden = true; };
+  $('btn-interact').onclick = () => openMiniGame();
+  $('btn-min-dlg').onclick = () => {
+    const w = $('dialogue-wrap');
+    w.classList.toggle('minimized');
+    $('btn-min-dlg').textContent = w.classList.contains('minimized') ? '▲' : '▼';
+  };
+
+  const NASA_FACTS = [
+    'NASA’s OCO-2 satellite measures atmospheric CO₂ globally every 16 days to map emissions and forest sinks.',
+    'Phytoplankton tracked by NASA’s PACE satellite produce about half of Earth’s oxygen!',
+    'Excess CO₂ absorbed by oceans forms carbonic acid (H₂CO₃), lowering pH and stressing coral reefs.',
+    'NASA’s GEDI laser on the Space Station maps 3D forest canopy height to calculate stored carbon.'
+  ];
+  let factIdx = 0;
+  $('btn-tip').onclick = () => { if (playerChar) showDialogue(playerChar.name, NASA_FACTS[factIdx++ % NASA_FACTS.length]); };
+
+  // RPG Canvas Click-to-Move & Keyboard
+  rCanvas.addEventListener('pointerdown', e => {
+    const rect = rCanvas.getBoundingClientRect();
+    const gx = (e.clientX - rect.left) / rect.width * W_RPG;
+    const gy = (e.clientY - rect.top) / rect.height * H_RPG;
+    const r = currentRoom();
+    if (Math.hypot(gx - r.spirit.x, gy - r.spirit.y) < 28 && Math.hypot(player.x - r.spirit.x, player.y - r.spirit.y) < 48) {
+      openMiniGame(); return;
+    }
+    player.targetX = gx; player.targetY = Math.max(75, Math.min(H_RPG - 10, gy));
+  });
+
+  window.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (e.target.tagName === 'INPUT') return;
+    keys[k] = true;
+    if (k === 'escape') {
+      $('minigame-overlay').hidden = true;
+      $('modal-kharita').hidden = true;
+      $('modal-quests').hidden = true;
+      if (activeMode === 'sim' && view !== 'orbit') setView('orbit');
+    } else if ((k === 'e' || k === ' ') && activeMode === 'rpg' && $('onboarding').hidden && $('minigame-overlay').hidden) {
+      e.preventDefault(); openMiniGame();
+    } else if (k === 'k' && $('onboarding').hidden) {
+      $('modal-kharita').hidden = !$('modal-kharita').hidden;
+    } else if (k === 'q' && $('onboarding').hidden) {
+      renderQuestScroll(); $('modal-quests').hidden = !$('modal-quests').hidden;
+    } else if (k === 'm') {
+      $('btn-sound').click();
+    } else if (k === 'v') {
+      $('btn-voice').click();
+    } else if (activeMode === 'sim' && (k === ',' || k === '.')) {
+      clearInterval(trackTimer);
+      setYear(Math.max(1750, Math.min(2100, year + (k === '.' ? 10 : -10))));
+    }
+  });
+  window.addEventListener('keyup', e => { delete keys[e.key.toLowerCase()]; });
+
+  document.querySelectorAll('.pad-btn[data-dir]').forEach(btn => {
+    const map = { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' };
+    const key = map[btn.dataset.dir];
+    btn.addEventListener('pointerdown', e => { e.preventDefault(); keys[key] = true; });
+    btn.addEventListener('pointerup', () => { delete keys[key]; });
+  });
+  $('pad-act').onclick = () => openMiniGame();
+
+  // Onboarding
+  const rosterEl = $('roster');
+  COMPANIONS.forEach(comp => {
+    const btn = document.createElement('button');
+    btn.className = 'char-card';
+    btn.setAttribute('aria-pressed', 'false');
+    const c2 = document.createElement('canvas'); c2.width = 32; c2.height = 36;
+    drawPortrait(c2.getContext('2d'), comp, 'happy', false, 0);
+    const lbl = document.createElement('span'); lbl.textContent = comp.name;
+    btn.append(c2, lbl);
+    btn.onclick = () => {
+      playerChar = { ...comp };
+      [...rosterEl.children].forEach(x => x.setAttribute('aria-pressed', x === btn));
+      $('btn-select-char').disabled = false;
+      $('name-input').placeholder = comp.name;
+      initAudio(); audioOn = true;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      $('btn-sound').textContent = '🔊 Sound: On';
+      $('btn-sound').setAttribute('aria-pressed', 'true');
+      blipSound();
+    };
+    rosterEl.appendChild(btn);
+  });
+
+  $('btn-select-char').onclick = () => {
+    const custom = $('name-input').value.trim();
+    if (custom) playerChar.name = custom;
+    $('ob-step1').hidden = true; $('ob-step2').hidden = false;
+    const intro = `Hiii! I'm ${playerChar.name}! We can explore NASA's interactive Earth climate simulation from orbit AND walk through 5 interconnected 16-bit biomes to restore ecosystems and hear Earth's data come alive as music!`;
+    $('ob-intro-text').textContent = intro;
+    speakText(intro);
+  };
+
+  function finishOnboarding(startInRPG) {
+    $('onboarding').classList.add('fade-out');
+    setTimeout(() => { $('onboarding').hidden = true; }, 600);
+    switchMode(startInRPG ? 'rpg' : 'sim');
+  }
+  $('btn-start-sim').onclick = () => finishOnboarding(false);
+  $('btn-start-rpg').onclick = () => finishOnboarding(true);
+
+  // =========================================================================
+  // 8. MAIN ANIMATION LOOP
+  // =========================================================================
+  const portCtx = $('portrait-canvas').getContext('2d');
+  const bigCtx = $('big-preview').getContext('2d');
+  const specCtx = $('spec').getContext('2d');
+  const freqData = new Uint8Array(64);
+  let lastFrame = 0, lastSonify = 0;
+
+  function loop(t) {
+    const dt = Math.min(0.05, (t - lastFrame) / 1000 || 0.016);
+    lastFrame = t;
+
+    if (activeMode === 'sim') {
+      if (auto && t - lastRot > 40) { rot += 0.012; lastRot = t; }
+      if (view === 'orbit') drawGlobe();
+      else drawCloseUp(t);
+    } else {
+      updateRPGPlayer(dt);
+      renderRPGRoom(t);
+    }
+
+    if (playerChar) {
+      if (!$('onboarding').hidden && !$('ob-step2').hidden) drawPortrait(bigCtx, playerChar, 'happy', false, t);
+      if (portraitSpirit) drawSpiritPortrait(portCtx, portraitSpirit, t);
+      else drawPortrait(portCtx, playerChar, mood, maskOn, t);
+    }
+
+    if (t - lastSonify > 250) { lastSonify = t; updateSonification(); }
+    specCtx.clearRect(0, 0, 320, 54);
+    if (analyser && audioOn) {
+      analyser.getByteFrequencyData(freqData);
+      specCtx.fillStyle = maskOn ? '#ff8a4c' : '#5fd0ff';
+      for (let i = 0; i < 64; i++) {
+        const h = (freqData[i] / 255) * 54;
+        specCtx.fillRect(i * 5, 54 - h, 4, h);
+      }
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  setYear(2026);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
